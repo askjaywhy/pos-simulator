@@ -1,10 +1,14 @@
 {
   "mcpServers": {
     "playwright": {
-      "command": "npx",
+      "command": "cmd",
       "args": [
+        "/c",
+        "npx",
+        "-y",
         "@playwright/mcp@latest",
-        "--allowed-origins", "http://localhost:3000;http://localhost:3001",
+        "--allowed-origins",
+        "http://localhost:3000;http://localhost:3001",
         "--isolated"
       ]
     }

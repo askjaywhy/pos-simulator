@@ -16,3 +16,6 @@ Desktop.ini
 .vscode/
 
 # Keep: heal-log/ (agent audit trail) and specs/ (agent plans)
+
+# Claude Code personal permissions (per machine, not shared)
+.claude/settings.local.json
