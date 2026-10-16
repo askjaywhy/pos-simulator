@@ -1,0 +1,18 @@
+{
+  "name": "pos-simulator-tests",
+  "version": "1.0.0",
+  "description": "Playwright test suite for POS Simulator with EMV/ISO 8583",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:ready": "playwright test -c playwright.ready.config.js",
+    "test:agent-ui": "playwright test ui/agent --reporter=list",
+    "test:legacy": "playwright test ui/payment-form --reporter=list",
+    "test:guard": "node --test ../.claude/hooks/tests/guard.test.js",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

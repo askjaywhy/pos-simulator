@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>💳 POS Terminal Simulator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .status-badges {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .badge.active {
+            background: rgba(76, 175, 80, 0.3);
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            padding: 30px;
+        }
+
+        .panel {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel h2 {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 15px;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 14px 28px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 10px;
+            width: 100%;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .button-secondary {
+            background: #f5f5f5;
+            color: #333;
+            margin-top: 5px;
+            font-size: 0.9em;
+            padding: 10px;
+        }
+
+        .button-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .result {
+            background: #f5f5f5;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .result.active {
+            display: block;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .status-indicator {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        .status-approved {
+            background: #c8e6c9;
+            color: #2e7d32;
+        }
+
+        .status-declined {
+            background: #ffcdd2;
+            color: #c62828;
+        }
+
+        .result-section {
+            margin: 15px 0;
+        }
+
+        .result-label {
+            color: #888;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+
+        .result-value {
+            font-family: 'Courier New', monospace;
+            font-size: 1.1em;
+            color: #333;
+            word-break: break-all;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .tab-button {
+            padding: 12px 20px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-weight: 500;
+            color: #888;
+            margin: 0;
+            width: auto;
+            transition: all 0.3s;
+        }
+
+        .tab-button.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95em;
+        }
+
+        .data-table th {
+            background: #f0f0f0;
+            padding: 10px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .data-table td {
+            padding: 10px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .data-table tr:hover {
+            background: #f9f9f9;
+        }
+
+        .hex-value {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+
+        .copy-button {
+            background: #4CAF50;
+            padding: 6px 12px;
+            font-size: 0.85em;
+            margin-top: 0;
+        }
+
+        .copy-button:hover {
+            background: #45a049;
+        }
+
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+
+        .history-table th, .history-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .history-table th {
+            background: #f0f0f0;
+            font-weight: 600;
+        }
+
+        .error {
+            background: #ffebee;
+            border-left: 4px solid #c62828;
+            padding: 15px;
+            border-radius: 4px;
+            color: #c62828;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .error.active {
+            display: block;
+        }
+
+        .test-card-selector {
+            margin-bottom: 15px;
+        }
+
+        @media (max-width: 1024px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>💳 POS Terminal Simulator</h1>
+            <div class="status-badges">
+                <div class="badge active">✓ EMV Support</div>
+                <div class="badge active">✓ ISO 8583</div>
+                <div class="badge" id="backend-status">Backend: Checking...</div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- Left Panel: Payment Form -->
+            <div class="panel">
+                <h2>💳 Payment Form</h2>
+
+                <div class="error" id="error-message"></div>
+
+                <div class="test-card-selector">
+                    <label for="test-cards">Test Cards:</label>
+                    <select id="test-cards" onchange="selectTestCard()">
+                        <option value="">-- Select a test card --</option>
+                        <option value="4111111111111111">✓ 4111 1111 1111 1111 (Approved)</option>
+                        <option value="5555555555554444">✓ 5555 5555 5555 4444 (Approved)</option>
+                        <option value="378282246310005">✓ 3782 822463 10005 (Approved)</option>
+                        <option value="6011111111111117">✓ 6011 1111 1111 1117 (Approved)</option>
+                        <option value="4000000000000002">✗ 4000 0000 0000 0002 (Declined)</option>
+                        <option value="4000000000009987">✗ 4000 0000 0000 9987 (Declined)</option>
+                    </select>
+                </div>
+
+                <form id="payment-form" onsubmit="processTransaction(event)">
+                    <div class="form-group">
+                        <label for="card-number">Card Number:</label>
+                        <input type="text" id="card-number" placeholder="4111 1111 1111 1111" required>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="exp-date">Expiration (MM/YY):</label>
+                            <input type="text" id="exp-date" placeholder="12/25" pattern="\d{2}/\d{2}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="cvv">CVV:</label>
+                            <input type="text" id="cvv" placeholder="123" pattern="\d{3,4}" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="amount">Amount ($):</label>
+                        <input type="number" id="amount" placeholder="99.99" min="0.01" step="0.01" required>
+                    </div>
+
+                    <button type="submit">PROCESS TRANSACTION</button>
+                </form>
+
+                <button class="button-secondary" onclick="loadTransactionHistory()">📋 Load History</button>
+                <button class="button-secondary" onclick="resetDatabase()">🔄 Reset Database</button>
+            </div>
+
+            <!-- Right Panel: Results -->
+            <div class="panel">
+                <h2>📊 Transaction Results</h2>
+
+                <div class="result" id="result-section">
+                    <div class="result-header">
+                        <div>
+                            <div class="result-label">Status</div>
+                            <div class="status-indicator" id="result-status"></div>
+                        </div>
+                    </div>
+
+                    <div class="result-section">
+                        <div class="result-label">Transaction ID</div>
+                        <div class="result-value" id="result-transaction-id"></div>
+                    </div>
+
+                    <div class="result-section">
+                        <div class="result-label">Auth Code</div>
+                        <div class="result-value" id="result-auth-code"></div>
+                    </div>
+
+                    <div class="result-section">
+                        <div class="result-label">Amount</div>
+                        <div class="result-value" id="result-amount"></div>
+                    </div>
+
+                    <div class="result-section">
+                        <div class="result-label">Timestamp</div>
+                        <div class="result-value" id="result-timestamp"></div>
+                    </div>
+
+                    <div class="tabs">
+                        <button class="tab-button active" onclick="switchTab(event, 'summary')">Summary</button>
+                        <button class="tab-button" onclick="switchTab(event, 'emv')">EMV Tags</button>
+                        <button class="tab-button" onclick="switchTab(event, 'iso8583')">ISO 8583</button>
+                    </div>
+
+                    <div class="tab-content active" id="summary-tab">
+                        <table class="data-table">
+                            <tr>
+                                <th>Field</th>
+                                <th>Value</th>
+                            </tr>
+                            <tr>
+                                <td>Card Masked</td>
+                                <td id="summary-card"></td>
+                            </tr>
+                            <tr>
+                                <td>Response Code</td>
+                                <td id="summary-response"></td>
+                            </tr>
+                            <tr>
+                                <td>Card Brand</td>
+                                <td id="summary-brand"></td>
+                            </tr>
+                            <tr>
+                                <td>Decline Reason</td>
+                                <td id="summary-decline"></td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div class="tab-content" id="emv-tab">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Tag</th>
+                                    <th>Name</th>
+                                    <th>Value (Hex)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="emv-tags-body"></tbody>
+                        </table>
+                        <button class="copy-button" onclick="copyToClipboard('emv-hex')">📋 Copy TLV Hex</button>
+                        <div id="emv-hex" style="margin-top: 10px; display: none;"></div>
+                    </div>
+
+                    <div class="tab-content" id="iso8583-tab">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Field #</th>
+                                    <th>Name</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody id="iso8583-fields-body"></tbody>
+                        </table>
+                        <button class="copy-button" onclick="copyToClipboard('iso8583-hex')">📋 Copy Message Hex</button>
+                        <div id="iso8583-hex" style="margin-top: 10px; display: none;"></div>
+                    </div>
+                </div>
+
+                <div id="history-section" style="display: none;">
+                    <h3 style="margin-bottom: 15px;">Transaction History</h3>
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Status</th>
+                                <th>Amount</th>
+                                <th>Card</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:3001/api';
+        let currentTransaction = null;
+
+        // Check backend status
+        async function checkBackendStatus() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/health`);
+                if (response.ok) {
+                    document.getElementById('backend-status').textContent = '✓ Backend: Online';
+                    document.getElementById('backend-status').classList.add('active');
+                }
+            } catch (error) {
+                document.getElementById('backend-status').textContent = '✗ Backend: Offline';
+                document.getElementById('backend-status').classList.remove('active');
+            }
+        }
+
+        // Select test card
+        function selectTestCard() {
+            const cardNumber = document.getElementById('test-cards').value;
+            if (cardNumber) {
+                document.getElementById('card-number').value = cardNumber;
+            }
+        }
+
+        // Process transaction
+        async function processTransaction(event) {
+            event.preventDefault();
+
+            const cardNumber = document.getElementById('card-number').value;
+            const expDate = document.getElementById('exp-date').value;
+            const cvv = document.getElementById('cvv').value;
+            const amount = parseFloat(document.getElementById('amount').value);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/transactions/process`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        card_number: cardNumber,
+                        exp_date: expDate,
+                        cvv: cvv,
+                        amount: amount
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    currentTransaction = data;
+                    displayResults(data);
+                    document.getElementById('error-message').classList.remove('active');
+                } else {
+                    showError(data.error || 'Transaction failed');
+                }
+            } catch (error) {
+                showError('Backend error: ' + error.message);
+            }
+        }
+
+        // Display results
+        function displayResults(data) {
+            document.getElementById('result-section').classList.add('active');
+
+            // Status
+            const statusDiv = document.getElementById('result-status');
+            statusDiv.textContent = data.status;
+            statusDiv.className = 'status-indicator status-' + data.status.toLowerCase();
+
+            // Summary
+            document.getElementById('result-transaction-id').textContent = data.transaction_id;
+            document.getElementById('result-auth-code').textContent = data.auth_code || 'N/A';
+            document.getElementById('result-amount').textContent = '$' + data.amount.toFixed(2);
+            document.getElementById('result-timestamp').textContent = new Date(data.timestamp).toLocaleString();
+
+            // Summary tab
+            document.getElementById('summary-card').textContent = data.card_masked;
+            document.getElementById('summary-response').textContent = data.response_code;
+            document.getElementById('summary-brand').textContent = data.card_brand;
+            document.getElementById('summary-decline').textContent = data.decline_reason || 'N/A';
+
+            // EMV Tags
+            const emvBody = document.getElementById('emv-tags-body');
+            emvBody.innerHTML = '';
+            let emvHex = '';
+            for (const [tag, tagData] of Object.entries(data.emv.tags)) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><span class="hex-value">${tag}</span></td>
+                    <td>${tagData.name}</td>
+                    <td><span class="hex-value">${tagData.value}</span></td>
+                `;
+                emvBody.appendChild(row);
+                emvHex += tag + tagData.value;
+            }
+            document.getElementById('emv-hex').textContent = data.emv.tlv_hex;
+
+            // ISO 8583 Fields
+            const isoBody = document.getElementById('iso8583-fields-body');
+            isoBody.innerHTML = '';
+            let isoHex = '';
+            for (const [field, fieldData] of Object.entries(data.iso8583.fields)) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${field}</td>
+                    <td>${fieldData.name}</td>
+                    <td><span class="hex-value">${fieldData.value}</span></td>
+                `;
+                isoBody.appendChild(row);
+                isoHex += field + fieldData.value;
+            }
+            document.getElementById('iso8583-hex').textContent = data.iso8583.hex_message;
+        }
+
+        // Switch tabs
+        function switchTab(event, tabName) {
+            event.preventDefault();
+
+            document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+            event.target.classList.add('active');
+            document.getElementById(tabName + '-tab').classList.add('active');
+        }
+
+        // Copy to clipboard
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            const text = element.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Copied to clipboard!');
+            });
+        }
+
+        // Load transaction history
+        async function loadTransactionHistory() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/transactions/history`);
+                const data = await response.json();
+
+                const historyBody = document.getElementById('history-body');
+                historyBody.innerHTML = '';
+
+                data.transactions.forEach(tx => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${tx.id.substring(0, 8)}...</td>
+                        <td>${tx.status}</td>
+                        <td>$${tx.amount.toFixed(2)}</td>
+                        <td>${tx.card_number_masked}</td>
+                        <td>${new Date(tx.timestamp).toLocaleString()}</td>
+                    `;
+                    historyBody.appendChild(row);
+                });
+
+                document.getElementById('history-section').style.display = 'block';
+            } catch (error) {
+                showError('Failed to load history: ' + error.message);
+            }
+        }
+
+        // Reset database
+        async function resetDatabase() {
+            if (confirm('Are you sure you want to reset the database?')) {
+                try {
+                    await fetch(`${API_BASE_URL}/admin/reset`, { method: 'POST' });
+                    alert('Database reset successfully');
+                    document.getElementById('history-section').style.display = 'none';
+                } catch (error) {
+                    showError('Failed to reset database: ' + error.message);
+                }
+            }
+        }
+
+        // Show error
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = '❌ ' + message;
+            errorDiv.classList.add('active');
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            checkBackendStatus();
+            setInterval(checkBackendStatus, 5000);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Playwright output (regenerated every run)
+tests/playwright-report/
+tests/test-results/
+playwright-report/
+test-results/
+
+# Temporary backups from setup
+_to_delete/
+
+# OS / editor clutter
+Thumbs.db
+Desktop.ini
+.vscode/
+
+# Keep: heal-log/ (agent audit trail) and specs/ (agent plans)
