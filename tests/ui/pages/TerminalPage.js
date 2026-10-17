@@ -24,6 +24,12 @@ export class TerminalPage {
     this.declineReason = page.locator('#summary-decline');
     this.maskedCard = page.locator('#summary-card');
     this.error = page.locator('#error-message');
+    // #id: result fields and header badge have no role/testid (testability gap)
+    this.transactionId = page.locator('#result-transaction-id');
+    this.backendStatus = page.locator('#backend-status');
+
+    // Headings
+    this.paymentFormHeading = page.getByRole('heading', { name: 'Payment Form' });
 
     // Tabs
     this.emvTab = page.getByRole('button', { name: 'EMV Tags' });
@@ -43,6 +49,44 @@ export class TerminalPage {
     await this.cvv.fill(cvv);
     await this.amount.fill(String(amount));
     await this.submit.click();
+  }
+
+  async selectTestCard(pan) {
+    // option values are the raw PANs
+    await this.testCardSelect.selectOption(pan);
+  }
+
+  // Simulate an unreachable backend. Must be called before goto() so the health poll fails too.
+  async failBackend() {
+    await this.page.route('http://localhost:3001/api/**', (route) => route.abort());
+  }
+
+  // Waits for the header badge to leave "Checking..." so screenshots are stable.
+  async waitForBackendOnline() {
+    await expect(this.backendStatus).toContainText('Online');
+  }
+
+  // Regions to mask in visual snapshots.
+  dynamicRegions() {
+    return [this.backendStatus];
+  }
+
+  // Native constraint-validation flags of a form field, by page-object member name.
+  async validityOf(field) {
+    return this[field].evaluate((el) => ({
+      valueMissing: el.validity.valueMissing,
+      patternMismatch: el.validity.patternMismatch,
+      rangeUnderflow: el.validity.rangeUnderflow,
+      stepMismatch: el.validity.stepMismatch,
+      valid: el.validity.valid,
+    }));
+  }
+
+  // True when the page has no horizontal overflow.
+  async fitsViewportWidth() {
+    return this.page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth
+    );
   }
 
   async openEmvTab() {
