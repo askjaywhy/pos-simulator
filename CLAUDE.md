@@ -29,7 +29,7 @@ Never invent card numbers. Never print a full PAN in logs, plans or test names â
 ## Terminal UI facts (verified from index.html)
 - Inputs have `<label for>`: "Card Number:", "Expiration (MM/YY):", "CVV:", "Amount ($):".
   Use `getByLabel`. They have `id`s, **not** `name` attributes.
-- Submit button text is "CHARGE" (renamed from "PROCESS TRANSACTION" on 2026-10-16; never "Pay").
+- Submit button text is "PROCESS TRANSACTION" (was "CHARGE" 2026-10-16 to 2026-10-17; never "Pay").
 - Results: status in `#result-status`; response code in `#summary-response`; brand in
   `#summary-brand`; decline reason in `#summary-decline`; errors in `#error-message`.
 - Tabs: "Summary", "EMV Tags", "ISO 8583".
