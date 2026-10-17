@@ -13,7 +13,7 @@ export class TerminalPage {
     this.expiry = page.getByLabel('Expiration (MM/YY):');
     this.cvv = page.getByLabel('CVV:');
     this.amount = page.getByLabel('Amount ($):');
-    this.submit = page.getByRole('button', { name: 'PROCESS TRANSACTION' });
+    this.submit = page.getByRole('button', { name: 'CHARGE' });
 
     // Results — no roles/testids on these divs, so ids are the stable hook (testability gap)
     this.status = page.locator('#result-status');
