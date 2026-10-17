@@ -82,4 +82,21 @@ test.describe('terminal card outcomes', () => {
     await expect(terminal.status).toHaveText('APPROVED');
     await expect(terminal.brand).toHaveText('DISCOVER');
   });
+
+  // Regression: the mask used to show the first 4 digits and hide the rest ("6011 ************").
+  // Fixed 2026-10-17 in backend maskCardNumber: only the last 4 are shown.
+  for (const { last4, pan, status } of [
+    { last4: '1117', pan: PAN.discover1117, status: 'APPROVED' }, // 16 digits
+    { last4: '0005', pan: PAN.amex0005, status: 'APPROVED' },     // 15 digits
+    { last4: '9987', pan: PAN.lost9987, status: 'DECLINED' },     // decline path
+  ]) {
+    test(`card •••• ${last4} (${status}) is masked to the last 4 digits`, async ({ terminal, request }) => {
+      await terminal.pay({ number: pan, amount: 10.0 });
+      await expect(terminal.status).toHaveText(status);
+      await expect(terminal.maskedCard).toHaveText(`•••• ${last4}`);
+
+      const tx = await fetchTransaction(request, terminal);
+      expect(tx.card_number_masked).toBe(`•••• ${last4}`);
+    });
+  }
 });

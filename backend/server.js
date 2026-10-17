@@ -115,7 +115,7 @@ function getCardBrand(cardNumber) {
 
 // Mask card number
 function maskCardNumber(cardNumber) {
-  return cardNumber.slice(0, 4) + ' ' + cardNumber.slice(4).replace(/\d/g, '*');
+  return '•••• ' + cardNumber.slice(-4);
 }
 
 // Test cards for reference
