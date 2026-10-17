@@ -19,3 +19,6 @@ Desktop.ini
 
 # Claude Code personal permissions (per machine, not shared)
 .claude/settings.local.json
+
+# Playwright MCP snapshots / console logs (local scratch)
+.playwright-mcp/
