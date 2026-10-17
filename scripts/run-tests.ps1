@@ -37,7 +37,6 @@ Write-Host ('=' * 64) -ForegroundColor Green
 Write-Host '  Ready. Commands (run here):' -ForegroundColor Green
 Write-Host '    npm run test:ready     API + page-object UI tests (should all pass)' -ForegroundColor Green
 Write-Host '    npm run test:agent-ui  only the page-object UI tests (tests\ui\agent)' -ForegroundColor Green
-Write-Host '    npm run test:legacy    the 11 old UI tests (expected to fail - wrong locators)' -ForegroundColor Green
 Write-Host '    npm test               everything' -ForegroundColor Green
 Write-Host '    npm run report         open the last HTML report' -ForegroundColor Green
 Write-Host ''
