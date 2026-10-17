@@ -29,7 +29,7 @@ Never invent card numbers. Never print a full PAN in logs, plans or test names �
 ## Terminal UI facts (verified from index.html)
 - Inputs have `<label for>`: "Card Number:", "Expiration (MM/YY):", "CVV:", "Amount ($):".
   Use `getByLabel`. They have `id`s, **not** `name` attributes.
-- Submit button text is "PROCESS TRANSACTION" (not "Pay").
+- Submit button text is "CHARGE" (renamed from "PROCESS TRANSACTION" on 2026-10-16; never "Pay").
 - Results: status in `#result-status`; response code in `#summary-response`; brand in
   `#summary-brand`; decline reason in `#summary-decline`; errors in `#error-message`.
 - Tabs: "Summary", "EMV Tags", "ISO 8583".
@@ -39,9 +39,9 @@ Never invent card numbers. Never print a full PAN in logs, plans or test names �
 ## What agents may change
 - Writable: `tests/` and `specs/` only. Enforced by `.claude/hooks/guard.js`.
 - **Never** edit `backend/`, `frontend/`, or the EMV / ISO 8583 classes to make a test pass.
-- The existing API specs in `tests/*.spec.js` and UI specs in `tests/ui/payment-form-*.spec.js`
-  are the baseline. Don't rewrite them. New page-object specs go in `tests/ui/agent/`;
-  a human decides when to retire the old ones.
+- The existing API specs in `tests/*.spec.js` are the baseline. Don't rewrite them.
+- All UI specs live in `tests/ui/agent/` (page-object layer). The legacy
+  `tests/ui/payment-form-*.spec.js` specs were retired 2026-10-17; don't recreate them.
 
 ## Layout for the new UI layer
 - `specs/*.plan.md`          — planner output, human-reviewed before generation
@@ -69,6 +69,8 @@ Never invent card numbers. Never print a full PAN in logs, plans or test names �
    matched "history" as an id (404). Fixed 2026-10-16 by moving the route above `/:id`.
 2. The Lost Card test PAN (old `•••• 0009`) failed Luhn, so it returned 400 instead of a 41 decline.
    Fixed 2026-10-16: replaced with `•••• 9987` (Luhn-valid, Stripe lost-card test number).
+3. `maskCardNumber` in `backend/server.js` showed the first 4 digits and hid the rest (`6011 ************`).
+   Fixed 2026-10-17: now returns `•••• NNNN` (last 4) in `card_masked`, `card_number_masked` and the UI.
 
 ## Commands (run from the `tests` folder — config lives there)
 - All: `cd tests && npx playwright test`
