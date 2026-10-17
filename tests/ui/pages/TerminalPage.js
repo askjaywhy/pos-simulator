@@ -61,6 +61,20 @@ export class TerminalPage {
     await this.page.route('http://localhost:3001/api/**', (route) => route.abort());
   }
 
+  // Make the payment request hang (never answered). Other API calls are untouched.
+  async hangPayments() {
+    await this.page.route('http://localhost:3001/api/transactions/process', () => {});
+  }
+
+  // Fake the page clock so timeouts can be reached without real waiting. Call before goto().
+  async installClock() {
+    await this.page.clock.install();
+  }
+
+  async advanceTime(ms) {
+    await this.page.clock.fastForward(ms);
+  }
+
   // Waits for the header badge to leave "Checking..." so screenshots are stable.
   async waitForBackendOnline() {
     await expect(this.backendStatus).toContainText('Online');

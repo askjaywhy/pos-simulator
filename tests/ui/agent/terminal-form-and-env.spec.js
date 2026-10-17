@@ -73,6 +73,22 @@ test.describe('backend unreachable', () => {
     const health = await request.get(`${API}/health`);
     expect(health.status()).toBe(200);
   });
+
+  // The terminal used to show nothing forever when a payment request hung.
+  // It now gives up after 15 s and warns that the outcome is unknown.
+  test('hung payment request times out with a status-unknown warning', async ({ terminal }) => {
+    await terminal.installClock();
+    await terminal.hangPayments();
+    await terminal.goto();
+    await terminal.pay({ number: VISA_1111, amount: 12.34 });
+    await expect(terminal.error).toBeHidden();
+
+    await terminal.advanceTime(15_000);
+    await expect(terminal.error).toBeVisible();
+    await expect(terminal.error).toContainText('Request timed out after 15 seconds');
+    await expect(terminal.error).toContainText('Transaction status unknown');
+    await expect(terminal.status).toBeHidden();
+  });
 });
 
 test.describe('phone viewport', () => {

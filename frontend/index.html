@@ -535,6 +535,7 @@
         }
 
         // Process transaction
+        const PAYMENT_TIMEOUT_MS = 15000;
         async function processTransaction(event) {
             event.preventDefault();
 
@@ -543,9 +544,14 @@
             const cvv = document.getElementById('cvv').value;
             const amount = parseFloat(document.getElementById('amount').value);
 
+            // Give up on a hung request instead of showing nothing forever.
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), PAYMENT_TIMEOUT_MS);
+
             try {
                 const response = await fetch(`${API_BASE_URL}/transactions/process`, {
                     method: 'POST',
+                    signal: controller.signal,
                     headers: {
                         'Content-Type': 'application/json'
                     },
@@ -567,7 +573,14 @@
                     showError(data.error || 'Transaction failed');
                 }
             } catch (error) {
-                showError('Backend error: ' + error.message);
+                if (error.name === 'AbortError') {
+                    // The server may still have processed it, so warn before a retry.
+                    showError('Request timed out after ' + (PAYMENT_TIMEOUT_MS / 1000) + ' seconds. Transaction status unknown - check Load History before retrying.');
+                } else {
+                    showError('Backend error: ' + error.message);
+                }
+            } finally {
+                clearTimeout(timer);
             }
         }
 
