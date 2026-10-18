@@ -22,3 +22,6 @@ Desktop.ini
 
 # Playwright MCP snapshots / console logs (local scratch)
 .playwright-mcp/
+
+# One-time human approval for a snapshot update (consumed by shell-guard)
+.claude/approve-snapshot-update

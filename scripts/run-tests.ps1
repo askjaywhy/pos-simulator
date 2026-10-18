@@ -28,8 +28,8 @@ foreach ($url in 'http://localhost:3001/api/health', 'http://localhost:3000') {
 
 Write-Host ''
 Write-Host 'Agent guard self-test:' -ForegroundColor Cyan
-node --test --test-reporter=dot ..\.claude\hooks\tests\guard.test.js
-if ($LASTEXITCODE -eq 0) { Write-Host '  guard OK (9 checks)' -ForegroundColor Green }
+node --test --test-reporter=dot ..\.claude\hooks\tests\guard.test.js ..\.claude\hooks\tests\shell-guard.test.js
+if ($LASTEXITCODE -eq 0) { Write-Host '  guard OK (25 checks)' -ForegroundColor Green }
 else { Write-Host '  guard FAILED - see output above' -ForegroundColor Red }
 
 Write-Host ''

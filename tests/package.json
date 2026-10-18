@@ -8,7 +8,7 @@
     "test:debug": "playwright test --debug",
     "test:ready": "playwright test -c playwright.ready.config.js",
     "test:agent-ui": "playwright test ui/agent --reporter=list",
-    "test:guard": "node --test ../.claude/hooks/tests/guard.test.js",
+    "test:guard": "node --test ../.claude/hooks/tests/guard.test.js ../.claude/hooks/tests/shell-guard.test.js",
     "report": "playwright show-report"
   },
   "devDependencies": {

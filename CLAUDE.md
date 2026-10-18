@@ -37,7 +37,15 @@ Never invent card numbers. Never print a full PAN in logs, plans or test names â
   finding; do not edit the UI.
 
 ## What agents may change
-- Writable: `tests/` and `specs/` only. Enforced by `.claude/hooks/guard.js`.
+- Writable: `tests/` and `specs/` only, through the Edit/Write tools. Enforced by
+  `.claude/hooks/guard.js` (Edit/Write) and `.claude/hooks/shell-guard.js` (Bash/PowerShell).
+- Never change files through shell commands (Set-Content, Add-Content, >, sed -i, git checkout/restore).
+  Shell writes to `backend/`, `frontend/`, `.claude/`, `CLAUDE.md`, `.mcp.json` or `*-snapshots/` are blocked.
+- Visual baselines (`*-snapshots/`) are expected results. Never run `--update-snapshots` / `-u`
+  on your own: report which snapshots differ and why, and ask the human to approve. The human
+  approves one update by running `New-Item .claude\approve-snapshot-update` (optionally with a
+  reason inside); the approval is used once and logged to `heal-log/heals.jsonl`.
+- No destructive git: no `reset --hard`, `clean -f`, `commit --amend`, `rebase` or force push.
 - **Never** edit `backend/`, `frontend/`, or the EMV / ISO 8583 classes to make a test pass.
 - The existing API specs in `tests/*.spec.js` are the baseline. Don't rewrite them.
 - All UI specs live in `tests/ui/agent/` (page-object layer). The legacy

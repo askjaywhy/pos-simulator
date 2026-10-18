@@ -34,6 +34,18 @@ function main(event) {
   if (rel.startsWith('..') || !WRITABLE.some((re) => re.test(rel.toLowerCase()))) {
     block(`agents may only write under tests/ or specs/ (attempted: ${rel}).`);
   }
+  // Visual baselines are expected results too: only `--update-snapshots` with human
+  // approval may change them (see shell-guard.js), never a direct file edit.
+  if (/-snapshots\//i.test(rel)) {
+    block(`visual baselines can't be edited directly (attempted: ${rel}).`);
+  }
+  // Turning on snapshot updates in config would bypass that approval.
+  const incoming = tool === 'Write' ? (inp.content || '')
+    : (inp.edits || [{ new_string: inp.new_string }]).map((e) => e.new_string || '').join('\n');
+  if (/updateSnapshots|update-snapshots/.test(incoming)) {
+    block('enabling snapshot updates in code/config needs human approval.');
+  }
+
   if (!/\.spec\.(ts|js)$/i.test(rel)) return;
 
   if (tool === 'Write') {
