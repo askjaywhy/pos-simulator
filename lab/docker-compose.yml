@@ -1,0 +1,203 @@
+# POS Simulator Lab: Kafka + Postgres + Splunk around the existing POS simulator.
+#
+# Data flow:
+#   POS simulator API (host, :3001)
+#     -> tx-producer  (polls /api/transactions/history, publishes new transactions)
+#     -> Kafka topic  pos.transactions
+#     -> tx-sinks     (two consumer groups: postgres-sink, splunk-sink)
+#     -> Postgres (card_transactions)   and   Splunk (sourcetype pos:transaction)
+#   risk-service (consumer group fraud-engine) scores each transaction, writes fraud alerts,
+#     card blocks and disputes to Postgres, publishes pos.fraud.alerts / pos.disputes,
+#     and serves the risk API + console on :3002. splunk-sink forwards all three topics.
+#
+# Start:  docker compose up -d --build        (or .\Start-Lab.ps1)
+# Traffic: docker compose run --rm traffic
+# Verify:  docker compose run --rm verify
+# Fraud:   docker compose run --rm --build fraud-scenarios
+
+name: pos-lab
+
+x-sim: &sim
+  POS_API: ${POS_API:-http://host.docker.internal:3001/api}
+
+services:
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: pos-kafka
+    ports:
+      - "9094:9094"            # host access: localhost:9094
+    environment:
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs   # lab data; cleared when the container is removed
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: pos-kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: pos-lab
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: pos-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: poslab
+      POSTGRES_PASSWORD: poslab
+      POSTGRES_DB: poslab
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poslab -d poslab"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  splunk:
+    image: splunk/splunk:9.2.1
+    container_name: pos-splunk
+    platform: linux/amd64
+    ports:
+      - "8000:8000"            # Splunk Web
+      - "8088:8088"            # HTTP Event Collector
+      - "8089:8089"            # REST API (used by verify)
+    environment:
+      SPLUNK_START_ARGS: --accept-license
+      SPLUNK_GENERAL_TERMS: --accept-sgt-current-at-splunk-com
+      SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:-PosLab#2026}
+      SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}
+      SPLUNK_HEC_SSL: "false"
+    volumes:
+      - splunk-var:/opt/splunk/var
+      - ./splunk/pos_lab:/opt/splunk/etc/apps/pos_lab
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:8088/services/collector/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 90s
+
+  tx-producer:
+    build: ./services
+    container_name: pos-tx-producer
+    command: ["node", "producer.js"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      <<: *sim
+      KAFKA_BROKERS: kafka:9092
+      TOPIC: pos.transactions
+      POLL_MS: 2000
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  tx-sinks:
+    build: ./services
+    container_name: pos-tx-sinks
+    command: ["node", "sinks.js"]
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TOPIC: pos.transactions
+      PGHOST: postgres
+      PGUSER: poslab
+      PGPASSWORD: poslab
+      PGDATABASE: poslab
+      SPLUNK_HEC_URL: http://splunk:8088/services/collector/event
+      SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Fraud engine + risk API + back-office console (http://localhost:3002)
+  risk-service:
+    build: ./risk
+    container_name: pos-risk-service
+    ports:
+      - "3002:3002"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TOPIC: pos.transactions
+      PGHOST: postgres
+      PGUSER: poslab
+      PGPASSWORD: poslab
+      PGDATABASE: poslab
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # One-off: end-to-end fraud & chargeback test suite
+  fraud-scenarios:
+    build: ./risk
+    profiles: ["tools"]
+    command: ["node", "scenarios.js"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      <<: *sim
+      RISK_API: http://risk-service:3002/api
+
+  # One-off: generate card traffic against the simulator
+  traffic:
+    build: ./services
+    profiles: ["tools"]
+    command: ["node", "traffic.js"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      <<: *sim
+      COUNT: ${COUNT:-100}
+      TPS: ${TPS:-5}
+
+  # One-off: end-to-end data sync check (simulator -> Kafka -> Postgres + Splunk)
+  verify:
+    build: ./services
+    profiles: ["tools"]
+    command: ["node", "verify.js"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      <<: *sim
+      PGHOST: postgres
+      PGUSER: poslab
+      PGPASSWORD: poslab
+      PGDATABASE: poslab
+      SPLUNK_API: https://splunk:8089
+      SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:-PosLab#2026}
+
+volumes:
+  pg-data:
+  splunk-var:

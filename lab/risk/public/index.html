@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Risk Console</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #1d2433; --muted: #5d677a; --line: #dde1e8;
+    --accent: #1f5fbf; --ok: #237a3b; --warn: #a86400; --bad: #b42318; --crit: #7a0f0f;
+    --chip: #eef1f6; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: #142033; color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  .kpis { display: flex; gap: 22px; flex-wrap: wrap; margin-left: auto; }
+  .kpi { font-size: 12px; color: #b9c3d6; }
+  .kpi b { display: block; font-size: 18px; color: #fff; font-variant-numeric: tabular-nums; }
+  .kpi.crit b { color: #ff8a80; }
+  nav { display: flex; gap: 4px; padding: 0 24px; background: #fff; border-bottom: 1px solid var(--line); }
+  nav button { border: 0; background: none; padding: 12px 14px; font: inherit; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
+  nav button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  main { padding: 20px 24px 40px; max-width: 1400px; }
+  section[hidden] { display: none; }
+  .bar { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-bottom: 14px; }
+  .bar h2 { font-size: 15px; margin: 0 auto 0 0; }
+  label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+  input, select, textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+  textarea { min-height: 60px; width: 100%; }
+  button.btn { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.btn.danger { color: var(--bad); border-color: #f0c4c0; }
+  button.btn.good { color: var(--ok); border-color: #bfe0c8; }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; background: #fafbfc; position: sticky; top: 0; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.mono, .mono { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+  #dd-meta .mono { white-space: normal; word-break: break-all; }
+  tr:last-child td { border-bottom: 0; }
+  .sev, .state { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: var(--chip); }
+  .sev.low { color: var(--muted); } .sev.medium { color: var(--warn); background: #fff4e0; }
+  .sev.high { color: var(--bad); background: #fdecea; } .sev.critical { color: #fff; background: var(--crit); }
+  .state.closed { color: var(--muted); }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .empty { padding: 24px; color: var(--muted); text-align: center; }
+  .forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-bottom: 16px; }
+  form.card { padding: 14px; display: grid; gap: 10px; }
+  form.card h3 { margin: 0; font-size: 14px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; } .row > label { flex: 1; min-width: 120px; }
+  #toast { position: fixed; right: 20px; bottom: 20px; max-width: 420px; padding: 10px 14px; border-radius: 8px; color: #fff; background: #142033; box-shadow: 0 4px 16px rgba(0,0,0,.2); opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; } #toast.error { background: var(--bad); }
+  dialog { border: 1px solid var(--line); border-radius: 10px; padding: 0; width: min(760px, 94vw); }
+  dialog .inner { padding: 18px; display: grid; gap: 12px; }
+  dialog h3 { margin: 0; }
+  .timeline { list-style: none; padding: 0; margin: 0; border-left: 2px solid var(--line); }
+  .timeline li { padding: 4px 0 8px 12px; position: relative; }
+  .timeline li::before { content: ""; position: absolute; left: -6px; top: 10px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  .muted { color: var(--muted); font-size: 12px; }
+  .params input { width: 110px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Risk Console · POS Lab</h1>
+  <div class="kpis" aria-label="Summary">
+    <div class="kpi"><b data-testid="kpi-open-alerts">–</b>Open alerts</div>
+    <div class="kpi crit"><b data-testid="kpi-critical">–</b>Critical</div>
+    <div class="kpi"><b data-testid="kpi-blocks">–</b>Blocked cards</div>
+    <div class="kpi"><b data-testid="kpi-disputes">–</b>Open disputes</div>
+    <div class="kpi"><b data-testid="kpi-dispute-amount">–</b>Disputed $</div>
+  </div>
+</header>
+<nav role="tablist">
+  <button role="tab" aria-selected="true" aria-controls="tab-alerts" data-tab="alerts">Fraud alerts</button>
+  <button role="tab" aria-selected="false" aria-controls="tab-blocks" data-tab="blocks">Card blocks</button>
+  <button role="tab" aria-selected="false" aria-controls="tab-disputes" data-tab="disputes">Disputes</button>
+  <button role="tab" aria-selected="false" aria-controls="tab-rules" data-tab="rules">Rules</button>
+</nav>
+<main>
+  <!-- Alerts -->
+  <section id="tab-alerts" role="tabpanel">
+    <div class="bar">
+      <h2>Fraud alerts</h2>
+      <label for="alert-status">Status
+        <select id="alert-status"><option value="OPEN">Open</option><option value="CONFIRMED_FRAUD">Confirmed fraud</option><option value="FALSE_POSITIVE">False positive</option><option value="">All</option></select>
+      </label>
+      <label for="alert-rule">Rule
+        <select id="alert-rule"><option value="">All</option><option>VELOCITY</option><option>HIGH_AMOUNT</option><option>LOST_STOLEN</option><option>BLOCKED_CARD_ACTIVITY</option></select>
+      </label>
+      <button class="btn" id="alerts-refresh">Refresh</button>
+    </div>
+    <div class="card"><table data-testid="alerts-table">
+      <thead><tr><th>#</th><th>Created</th><th>Rule</th><th>Severity</th><th>Card</th><th>Merchant</th><th class="num">Amount</th><th>Auth</th><th>Detail</th><th>Status</th><th>Review</th></tr></thead>
+      <tbody id="alerts-body"></tbody>
+    </table></div>
+  </section>
+
+  <!-- Blocks -->
+  <section id="tab-blocks" role="tabpanel" hidden>
+    <div class="forms">
+      <form class="card" id="block-form">
+        <h3>Block a card</h3>
+        <div class="row">
+          <label for="block-card">Card (last 4)<input id="block-card" placeholder="1117" maxlength="12" required></label>
+          <label for="block-reason">Reason<input id="block-reason" placeholder="Cardholder reported lost" required></label>
+        </div>
+        <div><button class="btn primary" type="submit">Block card</button></div>
+      </form>
+    </div>
+    <div class="bar"><h2>Card blocks</h2>
+      <label for="blocks-active">Show<select id="blocks-active"><option value="true">Active</option><option value="">All</option></select></label>
+      <button class="btn" id="blocks-refresh">Refresh</button>
+    </div>
+    <div class="card"><table data-testid="blocks-table">
+      <thead><tr><th>#</th><th>Card</th><th>Reason</th><th>Source</th><th>Created</th><th>Status</th><th></th></tr></thead>
+      <tbody id="blocks-body"></tbody>
+    </table></div>
+  </section>
+
+  <!-- Disputes -->
+  <section id="tab-disputes" role="tabpanel" hidden>
+    <div class="forms">
+      <form class="card" id="dispute-form">
+        <h3>File a chargeback</h3>
+        <label for="dispute-txn">Transaction ID<input id="dispute-txn" class="mono" placeholder="from the simulator or Postgres" required></label>
+        <div class="row">
+          <label for="dispute-network">Network<select id="dispute-network"><option>VISA</option><option>MASTERCARD</option><option>AMEX</option><option>DISCOVER</option></select></label>
+          <label for="dispute-reason">Reason code<select id="dispute-reason"></select></label>
+          <label for="dispute-amount">Amount (blank = full)<input id="dispute-amount" type="number" step="0.01" min="0.01"></label>
+        </div>
+        <label for="dispute-note">Cardholder statement<textarea id="dispute-note"></textarea></label>
+        <div><button class="btn primary" type="submit">File chargeback</button>
+          <span class="muted">Network must match the card brand. Only approved transactions qualify.</span></div>
+      </form>
+    </div>
+    <div class="bar"><h2>Disputes</h2>
+      <label for="disputes-open">Show<select id="disputes-open"><option value="true">Open</option><option value="false">Closed</option><option value="">All</option></select></label>
+      <button class="btn" id="disputes-refresh">Refresh</button>
+    </div>
+    <div class="card"><table data-testid="disputes-table">
+      <thead><tr><th>#</th><th>Card</th><th>Merchant</th><th>Reason</th><th class="num">Disputed</th><th>State</th><th>Respond by</th><th>Liability</th><th></th></tr></thead>
+      <tbody id="disputes-body"></tbody>
+    </table></div>
+  </section>
+
+  <!-- Rules -->
+  <section id="tab-rules" role="tabpanel" hidden>
+    <div class="bar"><h2>Fraud rules</h2><span class="muted">Changes apply to the next transaction scored.</span></div>
+    <div class="card"><table data-testid="rules-table">
+      <thead><tr><th>Rule</th><th>Description</th><th>Severity</th><th>Enabled</th><th>Parameters</th><th></th></tr></thead>
+      <tbody id="rules-body"></tbody>
+    </table></div>
+  </section>
+</main>
+
+<dialog id="dispute-dialog" aria-labelledby="dd-title">
+  <div class="inner">
+    <h3 id="dd-title">Dispute</h3>
+    <div id="dd-meta"></div>
+    <ol class="timeline" id="dd-timeline" data-testid="dispute-timeline"></ol>
+    <label for="dd-note">Note / evidence<textarea id="dd-note" placeholder="Required for represent and pre_arbitration"></textarea></label>
+    <div class="actions" id="dd-actions"></div>
+    <div><button class="btn" id="dd-close">Close</button></div>
+  </div>
+</dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const API = '/api';
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const money = (v) => v === null || v === undefined ? '' : '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const when = (v) => v ? new Date(v).toLocaleString() : '';
+const ACTION_LABELS = {
+  merchant_accept: 'Merchant accepts', represent: 'Merchant represents', withdraw: 'Issuer withdraws',
+  issuer_accept: 'Issuer accepts representment', pre_arbitration: 'Issuer pre-arbitration',
+  escalate_arbitration: 'Escalate to arbitration', ruling_cardholder: 'Ruling: cardholder', ruling_merchant: 'Ruling: merchant',
+};
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, { headers: { 'Content-Type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+function toast(msg, isError) {
+  const t = $('#toast'); t.textContent = msg; t.className = 'show' + (isError ? ' error' : '');
+  clearTimeout(toast.h); toast.h = setTimeout(() => (t.className = ''), 4000);
+}
+
+// Tabs
+document.querySelectorAll('nav [role=tab]').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('nav [role=tab]').forEach((x) => x.setAttribute('aria-selected', x === b));
+  document.querySelectorAll('main > section').forEach((s) => (s.hidden = s.id !== 'tab-' + b.dataset.tab));
+  LOADERS[b.dataset.tab]();
+}));
+
+async function loadSummary() {
+  try {
+    const s = await api('/summary');
+    $('[data-testid=kpi-open-alerts]').textContent = s.open_alerts;
+    $('[data-testid=kpi-critical]').textContent = s.critical_alerts;
+    $('[data-testid=kpi-blocks]').textContent = s.active_blocks;
+    $('[data-testid=kpi-disputes]').textContent = s.open_disputes;
+    $('[data-testid=kpi-dispute-amount]').textContent = money(s.open_dispute_amount);
+  } catch (e) { /* header stays at last values */ }
+}
+
+// Alerts
+async function loadAlerts() {
+  const q = new URLSearchParams();
+  if ($('#alert-status').value) q.set('status', $('#alert-status').value);
+  if ($('#alert-rule').value) q.set('rule_id', $('#alert-rule').value);
+  const { alerts } = await api('/fraud/alerts?' + q);
+  $('#alerts-body').innerHTML = alerts.length ? alerts.map((a) => `
+    <tr data-testid="alert-row" data-alert-id="${a.alert_id}">
+      <td class="mono">${a.alert_id}</td><td>${when(a.created_at)}</td><td>${esc(a.rule_id)}</td>
+      <td><span class="sev ${esc(a.severity)}">${esc(a.severity)}</span></td><td class="mono">${esc(a.card_masked)}</td>
+      <td>${esc(a.merchant_id)}</td><td class="num">${money(a.amount)}</td><td>${esc(a.txn_status)} ${esc(a.response_code)}</td>
+      <td>${esc(a.detail)}</td>
+      <td>${esc(a.status)}${a.dispute_id ? `<div class="muted">Chargeback #${a.dispute_id}</div>` : ''}${a.review_note ? `<div class="muted">${esc(a.review_note)}</div>` : ''}</td>
+      <td>${a.status === 'OPEN' ? `<div class="actions">
+        <button class="btn danger" data-review="CONFIRMED_FRAUD" data-id="${a.alert_id}">Confirm fraud</button>
+        <button class="btn good" data-review="FALSE_POSITIVE" data-id="${a.alert_id}">False positive</button></div>` : ''}</td>
+    </tr>`).join('') : '<tr><td colspan="11" class="empty">No alerts match.</td></tr>';
+}
+$('#alerts-body').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-review]'); if (!b) return;
+  b.disabled = true;
+  try {
+    const r = await api(`/fraud/alerts/${b.dataset.id}/review`, { method: 'POST', body: { decision: b.dataset.review, analyst: 'console' } });
+    toast(r.dispute ? `Alert #${b.dataset.id} confirmed. Chargeback #${r.dispute.dispute_id} filed (${r.dispute.network} ${r.dispute.reason_code}).`
+      : `Alert #${b.dataset.id} marked ${b.dataset.review.replace('_', ' ').toLowerCase()}.${r.dispute_note ? ' ' + r.dispute_note : ''}`);
+    loadAlerts(); loadSummary();
+  } catch (err) { toast(err.message, true); b.disabled = false; }
+});
+['#alert-status', '#alert-rule'].forEach((s) => $(s).addEventListener('change', loadAlerts));
+$('#alerts-refresh').addEventListener('click', loadAlerts);
+
+// Blocks
+async function loadBlocks() {
+  const a = $('#blocks-active').value;
+  const { blocks } = await api('/cards/blocks' + (a ? '?active=' + a : ''));
+  $('#blocks-body').innerHTML = blocks.length ? blocks.map((b) => `
+    <tr data-testid="block-row"><td class="mono">${b.block_id}</td><td class="mono">${esc(b.card_masked)}</td><td>${esc(b.reason)}</td>
+      <td>${esc(b.source)}</td><td>${when(b.created_at)}</td><td>${b.active ? 'Active' : 'Released ' + when(b.released_at)}</td>
+      <td>${b.active ? `<button class="btn" data-release="${b.block_id}">Release</button>` : ''}</td></tr>`).join('')
+    : '<tr><td colspan="7" class="empty">No blocks.</td></tr>';
+}
+$('#blocks-body').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-release]'); if (!b) return;
+  try { await api(`/cards/blocks/${b.dataset.release}/release`, { method: 'POST', body: { analyst: 'console' } }); toast('Block released.'); loadBlocks(); loadSummary(); }
+  catch (err) { toast(err.message, true); }
+});
+$('#block-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const b = await api('/cards/blocks', { method: 'POST', body: { card: $('#block-card').value, reason: $('#block-reason').value, analyst: 'console' } });
+    toast(`${b.card_masked} blocked.`); e.target.reset(); loadBlocks(); loadSummary();
+  } catch (err) { toast(err.message, true); }
+});
+$('#blocks-active').addEventListener('change', loadBlocks);
+$('#blocks-refresh').addEventListener('click', loadBlocks);
+
+// Disputes
+async function loadReasonCodes() {
+  const { reason_codes } = await api('/disputes/reason-codes?network=' + $('#dispute-network').value);
+  $('#dispute-reason').innerHTML = reason_codes.map((r) => `<option value="${esc(r.code)}">${esc(r.code)} · ${esc(r.description)}</option>`).join('');
+}
+async function loadDisputes() {
+  const o = $('#disputes-open').value;
+  const { disputes } = await api('/disputes' + (o ? '?open=' + o : ''));
+  $('#disputes-body').innerHTML = disputes.length ? disputes.map((d) => `
+    <tr data-testid="dispute-row" data-dispute-id="${d.dispute_id}">
+      <td class="mono">${d.dispute_id}</td><td class="mono">${esc(d.card_masked)}</td><td>${esc(d.merchant_id)}</td>
+      <td>${esc(d.network)} ${esc(d.reason_code)}<div class="muted">${esc(d.reason_description)}</div></td>
+      <td class="num">${money(d.dispute_amount)}<div class="muted">of ${money(d.txn_amount)}</div></td>
+      <td><span class="state ${d.closed_at ? 'closed' : ''}">${esc(d.state)}</span></td><td>${esc(d.respond_by ? String(d.respond_by).slice(0, 10) : '')}</td>
+      <td>${esc(d.liability || '')}</td><td><button class="btn" data-open="${d.dispute_id}">Open</button></td></tr>`).join('')
+    : '<tr><td colspan="9" class="empty">No disputes.</td></tr>';
+}
+async function openDispute(id) {
+  const d = await api('/disputes/' + id);
+  $('#dd-title').textContent = `Dispute #${d.dispute_id} · ${d.state}`;
+  $('#dd-meta').innerHTML = `<div class="mono">${esc(d.transaction_id)}</div>
+    <div>${esc(d.card_masked)} · ${esc(d.merchant_id)} · ${esc(d.network)} ${esc(d.reason_code)} (${esc(d.reason_category)}) · ${money(d.dispute_amount)} of ${money(d.txn_amount)}</div>
+    <div class="muted">Provisional credit: ${d.provisional_credit ? 'yes' : 'reversed'}${d.liability ? ' · Liability: ' + esc(d.liability) : ''}${d.respond_by ? ' · Respond by ' + String(d.respond_by).slice(0, 10) : ''}</div>`;
+  $('#dd-timeline').innerHTML = d.events.map((e) => `<li><b>${esc(e.action)}</b> → ${esc(e.to_state)} <span class="muted">by ${esc(e.actor)}, ${when(e.created_at)}</span>${e.note ? `<div>${esc(e.note)}</div>` : ''}</li>`).join('');
+  $('#dd-actions').innerHTML = d.allowed_actions.length
+    ? d.allowed_actions.map((a) => `<button class="btn" data-action="${a}" data-id="${d.dispute_id}">${ACTION_LABELS[a] || a}</button>`).join('')
+    : '<span class="muted">Closed. No further actions.</span>';
+  $('#dd-note').value = '';
+  if (!$('#dispute-dialog').open) $('#dispute-dialog').showModal();
+}
+$('#disputes-body').addEventListener('click', (e) => { const b = e.target.closest('[data-open]'); if (b) openDispute(b.dataset.open).catch((err) => toast(err.message, true)); });
+$('#dd-actions').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-action]'); if (!b) return;
+  try {
+    const d = await api(`/disputes/${b.dataset.id}/actions`, { method: 'POST', body: { action: b.dataset.action, note: $('#dd-note').value || null } });
+    toast(`Dispute #${d.dispute_id} → ${d.state}`); await openDispute(d.dispute_id); loadDisputes(); loadSummary();
+  } catch (err) { toast(err.message, true); }
+});
+$('#dd-close').addEventListener('click', () => $('#dispute-dialog').close());
+$('#dispute-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const d = await api('/disputes', { method: 'POST', body: {
+      transaction_id: $('#dispute-txn').value.trim(), reason_code: $('#dispute-reason').value,
+      amount: $('#dispute-amount').value || undefined, note: $('#dispute-note').value || undefined } });
+    toast(`Chargeback #${d.dispute_id} filed (${d.network} ${d.reason_code}).`); e.target.reset(); loadReasonCodes(); loadDisputes(); loadSummary();
+  } catch (err) { toast(err.message, true); }
+});
+$('#dispute-network').addEventListener('change', loadReasonCodes);
+$('#disputes-open').addEventListener('change', loadDisputes);
+$('#disputes-refresh').addEventListener('click', loadDisputes);
+
+// Rules
+const PARAM_KEYS = { VELOCITY: ['max_txns', 'window_seconds', 'dedup_seconds'], HIGH_AMOUNT: ['min_amount'], LOST_STOLEN: ['dedup_seconds'], BLOCKED_CARD_ACTIVITY: [] };
+async function loadRules() {
+  const { rules } = await api('/fraud/rules');
+  $('#rules-body').innerHTML = rules.map((r) => `
+    <tr data-testid="rule-row" data-rule="${r.rule_id}">
+      <td><b>${esc(r.name)}</b><div class="mono muted">${esc(r.rule_id)}</div></td><td>${esc(r.description)}</td>
+      <td><label>Severity<select data-k="severity">${['low', 'medium', 'high', 'critical'].map((s) => `<option ${s === r.severity ? 'selected' : ''}>${s}</option>`).join('')}</select></label></td>
+      <td><label>Enabled<input type="checkbox" data-k="enabled" ${r.enabled ? 'checked' : ''}></label></td>
+      <td class="params row">${PARAM_KEYS[r.rule_id].map((k) => `<label>${k}<input type="number" min="0" data-p="${k}" value="${esc(r.params[k])}"></label>`).join('') || '<span class="muted">none</span>'}</td>
+      <td><button class="btn primary" data-save="${r.rule_id}">Save</button></td></tr>`).join('');
+}
+$('#rules-body').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-save]'); if (!b) return;
+  const tr = b.closest('tr'); const params = {};
+  tr.querySelectorAll('[data-p]').forEach((i) => (params[i.dataset.p] = i.value === '' ? undefined : Number(i.value)));
+  try {
+    await api('/fraud/rules/' + b.dataset.save, { method: 'PUT', body: {
+      severity: tr.querySelector('[data-k=severity]').value, enabled: tr.querySelector('[data-k=enabled]').checked, params } });
+    toast(`${b.dataset.save} saved.`); loadRules();
+  } catch (err) { toast(err.message, true); }
+});
+
+const LOADERS = { alerts: loadAlerts, blocks: loadBlocks, disputes: () => Promise.all([loadReasonCodes(), loadDisputes()]), rules: loadRules };
+loadSummary(); loadAlerts().catch((e) => toast(e.message, true));
+setInterval(loadSummary, 5000);
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "pos-lab-risk-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fraud engine, card blocks, and dispute/chargeback API for the POS simulator lab",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/unit.test.js",
+    "scenarios": "node scenarios.js"
+  },
+  "dependencies": {
+    "express": "4.21.2",
+    "kafkajs": "2.2.4",
+    "pg": "8.11.3"
+  }
+}

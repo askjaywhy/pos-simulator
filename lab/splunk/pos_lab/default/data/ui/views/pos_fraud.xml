@@ -1,0 +1,98 @@
+<form version="1.1" theme="dark">
+  <label>Fraud &amp; Disputes</label>
+  <description>Fraud alerts, card blocks and chargeback lifecycle from the risk service (sourcetypes pos:fraud, pos:dispute)</description>
+  <fieldset submitButton="false" autoRun="true">
+    <input type="time" token="t">
+      <label>Time range</label>
+      <default><earliest>-24h@h</earliest><latest>now</latest></default>
+    </input>
+  </fieldset>
+
+  <row>
+    <panel>
+      <title>Alerts raised</title>
+      <single>
+        <search><query>sourcetype="pos:fraud" event_type="fraud.alert.created" | spath | dedup alert_id | stats count</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest></search>
+      </single>
+    </panel>
+    <panel>
+      <title>Critical alerts</title>
+      <single>
+        <search><query>sourcetype="pos:fraud" event_type="fraud.alert.created" severity="critical" | dedup alert_id | stats count</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest></search>
+        <option name="rangeColors">["0x53a051","0xdc4e41"]</option><option name="rangeValues">[0]</option><option name="useColors">1</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Confirmed fraud rate (reviewed alerts)</title>
+      <single>
+        <search><query>sourcetype="pos:fraud" event_type="fraud.alert.reviewed" | dedup alert_id | stats count(eval(status="CONFIRMED_FRAUD")) as confirmed count as reviewed | eval rate=if(reviewed=0,0,round(confirmed/reviewed*100,1)) | fields rate</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest></search>
+        <option name="unit">%</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Chargebacks filed ($)</title>
+      <single>
+        <search><query>sourcetype="pos:dispute" action="file_chargeback" | dedup dispute_id | stats sum(dispute_amount) as amt | eval amt=round(coalesce(amt,0),2)</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest></search>
+        <option name="unit">$</option><option name="unitPosition">before</option>
+      </single>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Alerts over time by rule</title>
+      <chart>
+        <search><query>sourcetype="pos:fraud" event_type="fraud.alert.created" | dedup alert_id | timechart span=5m count by rule_id</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest></search>
+        <option name="charting.chart">column</option><option name="charting.chart.stackMode">stacked</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Alert outcomes by rule (precision)</title>
+      <table>
+        <search><query>sourcetype="pos:fraud" event_type="fraud.alert.*" | dedup alert_id sortby -_time | stats count as alerts count(eval(status="CONFIRMED_FRAUD")) as confirmed count(eval(status="FALSE_POSITIVE")) as false_positive count(eval(status="OPEN")) as open by rule_id | eval precision_pct=if(confirmed+false_positive=0,"",round(confirmed/(confirmed+false_positive)*100,1))</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest></search>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Disputes by current state</title>
+      <chart>
+        <search><query>sourcetype="pos:dispute" | dedup dispute_id sortby -_time | stats count by to_state</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest></search>
+        <option name="charting.chart">bar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chargeback outcomes (closed)</title>
+      <table>
+        <search><query>sourcetype="pos:dispute" to_state="CLOSED_*" | dedup dispute_id | stats count as disputes sum(dispute_amount) as amount by network to_state liability | eval amount=round(amount,2) | sort network</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest></search>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Card blocks</title>
+      <table>
+        <search><query>sourcetype="pos:fraud" event_type IN ("card.blocked","card.unblocked") | table _time event_type card_masked reason source released_by | sort - _time | head 25</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest></search>
+      </table>
+    </panel>
+    <panel>
+      <title>Dispute audit trail</title>
+      <table>
+        <search><query>sourcetype="pos:dispute" | table _time dispute_id network reason_code action from_state to_state actor dispute_amount note | sort - _time | head 50</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest></search>
+        <option name="count">10</option>
+      </table>
+    </panel>
+  </row>
+</form>

@@ -1,0 +1,129 @@
+<form version="1.1" theme="dark">
+  <label>POS Transaction Monitor</label>
+  <description>Card transactions from the POS simulator, streamed through Kafka (sourcetype pos:transaction)</description>
+  <fieldset submitButton="false" autoRun="true">
+    <input type="time" token="t">
+      <label>Time range</label>
+      <default>
+        <earliest>-60m@m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="dropdown" token="brand">
+      <label>Card brand</label>
+      <choice value="*">All</choice>
+      <choice value="VISA">Visa</choice>
+      <choice value="MASTERCARD">Mastercard</choice>
+      <choice value="AMEX">Amex</choice>
+      <choice value="DISCOVER">Discover</choice>
+      <default>*</default>
+    </input>
+  </fieldset>
+
+  <row>
+    <panel>
+      <title>Transactions</title>
+      <single>
+        <search>
+          <query>sourcetype="pos:transaction" card_brand="$brand$" | stats count</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+      </single>
+    </panel>
+    <panel>
+      <title>Approval rate</title>
+      <single>
+        <search>
+          <query>sourcetype="pos:transaction" card_brand="$brand$" | stats count(eval(status="APPROVED")) as approved count as total | eval rate=round(approved/total*100,1) | fields rate</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+        <option name="unit">%</option>
+        <option name="rangeColors">["0xdc4e41","0xf8be34","0x53a051"]</option>
+        <option name="rangeValues">[80,90]</option>
+        <option name="useColors">1</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Approved volume ($)</title>
+      <single>
+        <search>
+          <query>sourcetype="pos:transaction" card_brand="$brand$" status="APPROVED" | stats sum(amount) as volume | eval volume=round(volume,2)</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+        <option name="unit">$</option>
+        <option name="unitPosition">before</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Lost-card attempts (DE39 = 41)</title>
+      <single>
+        <search>
+          <query>sourcetype="pos:transaction" card_brand="$brand$" response_code="41" | stats count</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+        <option name="rangeColors">["0x53a051","0xdc4e41"]</option>
+        <option name="rangeValues">[0]</option>
+        <option name="useColors">1</option>
+      </single>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Transactions per minute by status</title>
+      <chart>
+        <search>
+          <query>sourcetype="pos:transaction" card_brand="$brand$" | timechart span=1m count by status</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.fieldColors">{"APPROVED":0x53a051,"DECLINED":0xdc4e41}</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Declines by response code (DE39)</title>
+      <chart>
+        <search>
+          <query>sourcetype="pos:transaction" card_brand="$brand$" status="DECLINED" | eval code=response_code." ".response_text | stats count by code | sort - count</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+      </chart>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Volume by card brand</title>
+      <table>
+        <search>
+          <query>sourcetype="pos:transaction" card_brand="$brand$" | stats count as txns count(eval(status="APPROVED")) as approved sum(amount) as amount avg(amount) as avg_ticket by card_brand | eval approval_pct=round(approved/txns*100,1), amount=round(amount,2), avg_ticket=round(avg_ticket,2) | fields card_brand txns approval_pct amount avg_ticket | sort - txns</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+      </table>
+    </panel>
+    <panel>
+      <title>Top merchants</title>
+      <table>
+        <search>
+          <query>sourcetype="pos:transaction" card_brand="$brand$" | stats count as txns count(eval(status="DECLINED")) as declines sum(amount) as amount by merchant_id | eval decline_pct=round(declines/txns*100,1), amount=round(amount,2) | sort - txns</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+      </table>
+    </panel>
+  </row>
+
+  <row>
+    <panel>
+      <title>Latest transactions</title>
+      <table>
+        <search>
+          <query>sourcetype="pos:transaction" card_brand="$brand$" | table _time transaction_id card_masked card_brand amount merchant_id status response_code response_text auth_code mti kafka_partition kafka_offset | head 25</query>
+          <earliest>$t.earliest$</earliest><latest>$t.latest$</latest>
+        </search>
+        <option name="count">10</option>
+      </table>
+    </panel>
+  </row>
+</form>

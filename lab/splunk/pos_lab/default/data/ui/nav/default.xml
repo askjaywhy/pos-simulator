@@ -1,0 +1,5 @@
+<nav search_view="search">
+  <view name="pos_overview" default="true" />
+  <view name="pos_fraud" />
+  <view name="search" />
+</nav>

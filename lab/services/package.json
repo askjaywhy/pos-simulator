@@ -1,0 +1,10 @@
+{
+  "name": "pos-lab-services",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kafka producer/consumers, traffic generator and pipeline verifier for the POS simulator lab",
+  "dependencies": {
+    "kafkajs": "2.2.4",
+    "pg": "8.11.3"
+  }
+}
