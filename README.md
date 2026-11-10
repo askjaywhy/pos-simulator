@@ -2,6 +2,37 @@
 
 A comprehensive payment processing simulator with full EMV (Europay, MasterCard, Visa) tag support and ISO 8583 message format implementation for testing and development.
 
+## 🧪 QA Lab: payments test platform built around the simulator
+
+The [`lab/`](lab/) folder turns the simulator into an end-to-end payments QA environment. It runs in Docker, and the simulator code is unchanged.
+
+| Area | What it does | Tests |
+|---|---|---|
+| **Event pipeline** | Transactions stream through **Kafka** (keyed by card) to separate **Postgres** and **Splunk** consumer groups, with at-least-once, idempotent delivery | Source-to-target reconciliation (`verify`): 12 checks; crash-recovery test with no loss or duplicates |
+| **Fraud & chargebacks** | Rules engine (velocity, high amount, lost/stolen auto-block, approvals on blocked cards), analyst review, and the full dispute lifecycle through arbitration with Visa / Mastercard / Amex / Discover reason codes | `fraud-scenarios`: 39 checks + 12 unit tests |
+| **Java test suite** | **REST Assured** API and JSON Schema contract tests, **Cucumber** BDD chargeback scenarios, **Selenium** Page Object UI tests verified against the API | 54 tests, all passing |
+| **Monitoring** | Splunk dashboards for approval rate, declines by DE39, fraud alerts, rule precision and chargeback outcomes | SQL data-quality checks |
+
+### Defects found
+API testing uncovered **7 defects in the simulator**, each with steps, expected vs. actual, root cause and fix, plus an automated test that fails until it's fixed. See [`lab/java-tests/DEFECTS.md`](lab/java-tests/DEFECTS.md).
+
+| ID | Defect | Severity |
+|---|---|---|
+| DEF-001 | ISO 8583 DE4 loses a cent on amounts like $19.99 (floating-point `Math.floor`) | High |
+| DEF-002 | DE39 is always `00`, even on declined transactions | High |
+| DEF-003 | Full PAN returned by the API and stored unmasked | Critical (PCI DSS) |
+| DEF-004–007 | Invalid expiry month accepted, expired card approved, negative amount approved, declined transaction refundable | Medium–High |
+
+### Run it
+```powershell
+cd lab
+.\Start-Lab.ps1                                   # Kafka, Postgres, Splunk, risk service
+docker compose run --rm java-tests                # REST Assured + Cucumber + Selenium (54 tests)
+docker compose run --rm --build fraud-scenarios   # fraud & chargeback suite (39 checks)
+docker compose run --rm verify                    # pipeline source-to-target check
+```
+Full guide: [`lab/README.md`](lab/README.md) · Java suite: [`lab/java-tests/README.md`](lab/java-tests/README.md)
+
 ## 📋 Quick Features
 
 - ✅ **25+ EMV Tags** - Complete TLV (Tag-Length-Value) format support
@@ -10,7 +41,7 @@ A comprehensive payment processing simulator with full EMV (Europay, MasterCard,
 - ✅ **RESTful API** - Full transaction processing endpoints
 - ✅ **Interactive UI** - Beautiful terminal simulator interface
 - ✅ **32+ Automated Tests** - Playwright test suite covering all functionality
-- ✅ **Production Ready** - PCI-DSS and EMV Level 1 compliance ready
+- ✅ **QA Lab** - Kafka/Postgres/Splunk pipeline, fraud & chargeback engine, and Java test suite (see above)
 
 ## 🚀 5-Minute Quick Start
 
@@ -68,10 +99,10 @@ pos-simulator/
 │   ├── playwright.config.js  # Test configuration
 │   └── playwright-report/    # Test results (after running)
 │
-└── docs/
-    ├── README.md             # This file
-    ├── QUICK_START.md        # 5-minute setup guide
-    └── API.md                # API endpoint reference
+└── lab/                      # QA lab (Docker): Kafka, Postgres, Splunk,
+    ├── services/             #   pipeline producer/consumers, traffic, verify
+    ├── risk/                 #   fraud engine, chargeback API, risk console
+    └── java-tests/           #   REST Assured, Cucumber, Selenium, DEFECTS.md
 ```
 
 ## 🏗️ Architecture
@@ -234,7 +265,7 @@ npx playwright show-report
 - ✅ **TLV Format** - Proper Tag-Length-Value encoding
 - ✅ **Hex Output** - All data in proper hex format
 - ✅ **STAN Uniqueness** - System Trace Audit Number generation
-- ✅ **PCI Considerations** - No real card storage (test cards only)
+- ⚠️ **PCI** - Test cards only, but the full PAN is currently returned and stored in the ISO 8583 message ([DEF-003](lab/java-tests/DEFECTS.md))
 
 ## 🛠️ Troubleshooting
 
@@ -274,8 +305,11 @@ npm test
 | Document | Purpose | Time |
 |----------|---------|------|
 | [README.md](README.md) | Overview & quick start | 5 min |
-| [QUICK_START.md](docs/QUICK_START.md) | Detailed setup guide | 10 min |
-| [API.md](docs/API.md) | Complete API reference | 15 min |
+| [INSTALL.md](INSTALL.md) | Installation | 5 min |
+| [SETUP_GUIDE.md](SETUP_GUIDE.md) | Detailed setup guide | 10 min |
+| [ARCHITECTURE.txt](ARCHITECTURE.txt) | Architecture notes | 10 min |
+| [lab/README.md](lab/README.md) | QA lab: pipeline, fraud module, exercises | 15 min |
+| [lab/java-tests/DEFECTS.md](lab/java-tests/DEFECTS.md) | Defect log | 10 min |
 
 ## 🚀 Next Steps
 
@@ -299,7 +333,7 @@ npm test
 
 ## 📞 Support
 
-- Check the documentation in `docs/` directory
+- Check the documentation listed above
 - Review test cases for usage examples
 - Verify backend is running on port 3001
 - Check browser console for errors
@@ -312,4 +346,4 @@ Test/Development Use Only - Do not use with real card data
 
 **Version:** 1.0.0  
 **Last Updated:** 2026-10-11  
-**Status:** Production Ready
+**Status:** Test/development tool. See the [defect log](lab/java-tests/DEFECTS.md)
