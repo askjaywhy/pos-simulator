@@ -36,6 +36,7 @@ Next
   docker compose run --rm -e COUNT=500 traffic     # send 500
   docker compose run --rm verify                   # end-to-end data sync check
   docker compose run --rm fraud-scenarios          # fraud & chargeback test suite
+  docker compose run --rm java-tests               # Java: REST Assured + Cucumber + Selenium
   docker compose logs -f tx-producer tx-sinks      # watch the pipeline
   .\Stop-Lab.ps1                                   # stop everything
 "@ -ForegroundColor Green

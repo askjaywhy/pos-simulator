@@ -128,9 +128,20 @@ docker compose run --rm -e TPS=8 traffic             # bot-like traffic: watch V
 | `POST /api/disputes` | `{transaction_id, reason_code, amount?, note?}` |
 | `POST /api/disputes/:id/actions` | `{action, note}`; the response lists `allowed_actions` |
 
+## Java tests: REST Assured, Cucumber, Selenium
+
+`java-tests/` is a Maven project that runs in Docker, so no Java install is needed. See `java-tests/README.md` for details.
+
+```powershell
+docker compose run --rm java-tests          # API + BDD + UI suite; watch the browser at http://localhost:7900
+docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -DexcludedGroups=   # 7 simulator defects (fail by design)
+```
+- Reports: `java-tests/target/cucumber-report.html` and `java-tests/target/surefire-reports/`
+- Defect log: `java-tests/DEFECTS.md`, covering the DE4 rounding, DE39 on declines, unmasked PAN (PCI), expiry, negative amounts, and refunds of declines.
+
 ## Coming next
 - **AWS migration:** treat this Postgres as on-prem and migrate it to LocalStack. Reconcile source against target.
-- **REST Assured / SOAP:** Java API tests and a SOAP card-servicing endpoint.
+- **SOAP:** a SOAP card-servicing endpoint with ISO 8583 fields packed and unpacked, tested with SoapUI.
 
 ## Troubleshooting
 - **Producer logs "POS simulator not reachable":** the simulator isn't running on :3001, or Docker can't reach the host. Check `http://localhost:3001/api/health` in a browser.

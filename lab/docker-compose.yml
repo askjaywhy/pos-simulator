@@ -14,6 +14,7 @@
 # Traffic: docker compose run --rm traffic
 # Verify:  docker compose run --rm verify
 # Fraud:   docker compose run --rm --build fraud-scenarios
+# Java:    docker compose run --rm java-tests          (REST Assured + Cucumber + Selenium)
 
 name: pos-lab
 
@@ -170,6 +171,41 @@ services:
       <<: *sim
       RISK_API: http://risk-service:3002/api
 
+  # Selenium Grid with Chrome. Watch the browser live at http://localhost:7900 (no password)
+  selenium:
+    image: selenium/standalone-chrome:4.21.0
+    container_name: pos-selenium
+    profiles: ["tools"]
+    shm_size: 2gb
+    ports:
+      - "4444:4444"            # WebDriver / Grid UI
+      - "7900:7900"            # noVNC live view
+    environment:
+      SE_VNC_NO_PASSWORD: "1"
+      SE_NODE_MAX_SESSIONS: "1"
+      SE_NODE_SESSION_TIMEOUT: "120"
+
+  # One-off: Java tests (REST Assured, Cucumber, Selenium) run with Maven in a container.
+  #   docker compose run --rm java-tests
+  #   docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -DexcludedGroups=
+  java-tests:
+    image: maven:3.9.6-eclipse-temurin-21
+    profiles: ["tools"]
+    working_dir: /work
+    command: ["mvn", "-B", "-ntp", "test"]
+    volumes:
+      - ./java-tests:/work
+      - m2-cache:/root/.m2       # Maven downloads are cached between runs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      <<: *sim
+      RISK_API: http://risk-service:3002/api
+      CONSOLE_URL: http://risk-service:3002   # as the browser in the selenium container sees it
+      SELENIUM_URL: http://selenium:4444
+    depends_on:
+      - selenium
+
   # One-off: generate card traffic against the simulator
   traffic:
     build: ./services
@@ -199,5 +235,6 @@ services:
       SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:-PosLab#2026}
 
 volumes:
+  m2-cache:
   pg-data:
   splunk-var:

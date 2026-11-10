@@ -25,3 +25,6 @@ Desktop.ini
 
 # One-time human approval for a snapshot update (consumed by shell-guard)
 .claude/approve-snapshot-update
+
+# Java test build output and reports (lab/java-tests)
+lab/java-tests/target/

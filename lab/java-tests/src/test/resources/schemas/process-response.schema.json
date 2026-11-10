@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "POS simulator authorization response",
+  "type": "object",
+  "required": ["success", "transaction_id", "status", "response_code", "amount", "currency", "timestamp", "card_masked", "card_brand", "emv", "iso8583"],
+  "properties": {
+    "success": { "type": "boolean" },
+    "transaction_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "status": { "enum": ["APPROVED", "DECLINED"] },
+    "response_code": { "type": "string", "pattern": "^[0-9]{2}$" },
+    "decline_reason": { "type": ["string", "null"] },
+    "auth_code": { "type": ["string", "null"] },
+    "amount": { "type": "number" },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "timestamp": { "type": "string" },
+    "card_masked": { "type": "string", "pattern": "^•{4} [0-9]{4}$" },
+    "card_brand": { "enum": ["VISA", "MASTERCARD", "AMEX", "DISCOVER", "UNKNOWN"] },
+    "emv": {
+      "type": "object",
+      "required": ["tags", "tlv_hex"],
+      "properties": { "tlv_hex": { "type": "string" } }
+    },
+    "iso8583": {
+      "type": "object",
+      "required": ["mti", "fields", "hex_message"],
+      "properties": {
+        "mti": { "type": "string", "pattern": "^[0-9]{4}$" },
+        "fields": { "type": "object" },
+        "hex_message": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Risk service dispute",
+  "type": "object",
+  "required": ["dispute_id", "transaction_id", "card_masked", "card_brand", "txn_amount", "dispute_amount",
+               "network", "reason_code", "reason_description", "reason_category", "state",
+               "provisional_credit", "respond_by", "created_at", "allowed_actions"],
+  "properties": {
+    "dispute_id": { "type": ["string", "integer"] },
+    "transaction_id": { "type": "string" },
+    "card_masked": { "type": "string" },
+    "card_brand": { "enum": ["VISA", "MASTERCARD", "AMEX", "DISCOVER"] },
+    "txn_amount": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+    "dispute_amount": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$" },
+    "network": { "enum": ["VISA", "MASTERCARD", "AMEX", "DISCOVER"] },
+    "reason_code": { "type": "string" },
+    "reason_category": { "enum": ["fraud", "consumer", "processing"] },
+    "state": { "enum": ["CHARGEBACK_FILED", "REPRESENTED", "PRE_ARBITRATION", "ARBITRATION",
+                        "CLOSED_CARDHOLDER_WON", "CLOSED_MERCHANT_WON", "CLOSED_WITHDRAWN"] },
+    "provisional_credit": { "type": "boolean" },
+    "liability": { "enum": ["merchant", "cardholder", null] },
+    "respond_by": { "type": ["string", "null"] },
+    "allowed_actions": { "type": "array", "items": { "type": "string" } }
+  }
+}
