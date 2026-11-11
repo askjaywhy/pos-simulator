@@ -10,7 +10,7 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 | ID | Title | Severity | Area |
 |---|---|---|---|
 | DEF-001 | ISO 8583 DE4 amount loses a cent for some values | High | Financial accuracy |
-| DEF-002 | DE39 is always `00`, even on declined transactions | High | ISO 8583 / reconciliation |
+| DEF-002 | DE39 is always `00`, even on declined transactions (**fixed**) | High | ISO 8583 / reconciliation |
 | DEF-003 | Full PAN returned by the API and stored unmasked (**fixed**) | Critical | PCI DSS |
 | DEF-004 | Invalid expiry month (13) accepted | Medium | Input validation |
 | DEF-005 | Expired card approved | High | Authorization rules |
@@ -35,6 +35,7 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 **Actual:** `response_code` = `51`, but DE39 = `00`.
 **Root cause:** `buildTransaction()` hard-codes `setField('39', '00')`. The decline decision in `server.js` is made later and never written back to the message.
 **Fix:** set DE39 from the authorization decision before building the message.
+**Status:** Fixed. `server.js` calls `EMVTransaction.setAuthorizationResult(responseCode)` after the decision; it sets DE39 and EMV tag `8A` (ASCII hex, e.g. `51` → `3531`) and rebuilds DE55. Regression tests: `SimulatorApiTest.de39MatchesDecision` (00/51/41/05) and `tests/de39-response-code.spec.js`. Interim: in a real flow DE39 and `8A` belong in the 0110 response; the simulator still builds only a 0100.
 
 ### DEF-003 Full PAN returned by the API and stored unmasked
 **Severity:** Critical (PCI DSS Requirement 3: protect stored account data; mask PAN when displayed).

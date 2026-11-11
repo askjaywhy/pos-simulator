@@ -187,4 +187,27 @@ class SimulatorApiTest {
         org.junit.jupiter.api.Assertions.assertFalse(stored.contains(Cards.VISA), "stored row contains the full PAN");
         org.junit.jupiter.api.Assertions.assertFalse(stored.contains(asciiHex(Cards.VISA)), "stored hex_message contains the full PAN");
     }
+
+    @ParameterizedTest(name = "DE39 and tag 8A carry response code {1} (DEF-002)")
+    @CsvSource({
+            "4111111111111111, 00, 3030",   // approved
+            "4000000000000002, 51, 3531",   // insufficient funds
+            "4000000000009987, 41, 3431",   // lost card
+            "5105105105105100, 05, 3035"    // generic decline (test PAN)
+    })
+    void de39MatchesDecision(String card, String code, String tag8a) {
+        String id = given().spec(Api.pos()).body(Api.payment(card, 20.00, MERCHANT))
+                .when().post("/transactions/process")
+                .then().statusCode(200)
+                .body("response_code", equalTo(code))
+                .body("iso8583.fields.'39'.value", equalTo(code))
+                .body("emv.tags.'8A'.value", equalTo(tag8a))
+                .body("emv.tlv_hex", containsString("8A02" + tag8a))
+                .extract().path("transaction_id");
+
+        given().spec(Api.pos())
+                .when().get("/transactions/{id}", id)
+                .then().statusCode(200)
+                .body("iso8583_message.fields.'39'.value", equalTo(code));
+    }
 }

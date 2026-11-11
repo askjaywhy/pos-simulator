@@ -422,6 +422,20 @@ class EMVTransaction {
     this.iso8583Message.setField('55', tlvHex);
   }
 
+  // DEF-002: write the authorization decision into the message: DE39 and EMV tag 8A
+  // (Authorisation Response Code, an2, so '51' is stored as ASCII hex 3531), then rebuild DE55.
+  // Interim fix: in a real flow DE39/8A belong in the 0110 response; the simulator only builds a 0100.
+  setAuthorizationResult(responseCode) {
+    const code = String(responseCode == null ? '' : responseCode).padStart(2, '0').slice(0, 2);
+    this.iso8583Message.setField('39', code);
+    this.emvTags.addTag('8A', {
+      name: 'Authorisation Response Code',
+      category: 'Response',
+      value: Buffer.from(code, 'ascii').toString('hex').toUpperCase()
+    });
+    this.iso8583Message.setField('55', this.emvTags.getTLVHex());
+  }
+
   getEMVData() {
     return {
       scheme: this.scheme,

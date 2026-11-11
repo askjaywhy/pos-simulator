@@ -37,16 +37,6 @@ class KnownDefectsTest {
     }
 
     @Test
-    @DisplayName("DEF-002 DE39 carries the decline code, not 00")
-    void de39MatchesDecline() {
-        given().spec(Api.pos()).body(Api.payment(Cards.VISA_INSUFFICIENT_FUNDS, 20.00, MERCHANT))
-                .when().post("/transactions/process")
-                .then().statusCode(200)
-                .body("response_code", equalTo("51"))
-                .body("iso8583.fields.'39'.value", equalTo("51"));
-    }
-
-    @Test
     @DisplayName("DEF-008 primary bitmap marks exactly the data elements present")
     void bitmapMatchesFields() {
         // The 0100 carries DE2, 4, 11, 12, 13, 39, 49 and 55. In a 64-bit primary bitmap

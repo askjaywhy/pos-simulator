@@ -220,6 +220,9 @@ app.post('/api/transactions/process', (req, res) => {
         authCode = 'AUTH' + transactionId.substring(0, 6).toUpperCase();
       }
 
+      // DEF-002: DE39 and tag 8A must reflect the decision, not a hard-coded 00
+      transaction.setAuthorizationResult(responseCode);
+
       const emvData = transaction.getEMVData();
       const isoData = transaction.getISO8583Data();
 
