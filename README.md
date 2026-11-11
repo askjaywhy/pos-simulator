@@ -35,39 +35,34 @@ Full guide: [`lab/README.md`](lab/README.md) · Java suite: [`lab/java-tests/REA
 
 ## 📋 Quick Features
 
-- ✅ **25+ EMV Tags** - Complete TLV (Tag-Length-Value) format support
-- ✅ **64+ ISO 8583 Fields** - Full message type indicator and bitmap-based field presence
-- ✅ **Test Cards** - Multiple decline scenarios for comprehensive testing
-- ✅ **RESTful API** - Full transaction processing endpoints
-- ✅ **Interactive UI** - Beautiful terminal simulator interface
-- ✅ **32+ Automated Tests** - Playwright test suite covering all functionality
+- ✅ **EMV TLV** - 23-tag dictionary; 12 scheme-flavored tags emitted in DE55 (simulated values, no real cryptogram)
+- ✅ **ISO 8583** - 0100 authorization message with DE2, 4, 11, 12, 13, 39, 49 and 55, plus a 22-field reference dictionary
+- ✅ **Test Cards** - 4 approval brands and 4 decline codes (05, 41, 51, 54)
+- ✅ **RESTful API** - Transaction processing, history, refunds, EMV and ISO 8583 inspection
+- ✅ **Interactive UI** - Terminal simulator with EMV and ISO 8583 tabs
+- ✅ **Automated Tests** - Playwright API specs plus a page-object UI suite with a visual baseline
+- ✅ **Agentic test kit** - Claude Code planner, generator and locator-only healer, held in check by hook guards (see below)
 - ✅ **QA Lab** - Kafka/Postgres/Splunk pipeline, fraud & chargeback engine, and Java test suite (see above)
 
 ## 🚀 5-Minute Quick Start
 
 ### Prerequisites
-- Node.js 14+ (`node --version`)
-- Python 3 (`python --version`)
+- Node.js 18+ (`node --version`)
 - Ports 3000 and 3001 available
 
-### Step 1: Install Backend Dependencies
-```bash
-cd backend
-npm install
+### Option A: One-click launcher (Windows)
+```powershell
+.\START_POS_SIMULATOR.bat          # backend, UI and a tests window
+.\START_POS_SIMULATOR.bat test     # same, then runs the ready test suite
 ```
+The launcher checks Node and the ports, then opens three windows: backend (:3001), UI (:3000) and tests.
 
-### Step 2: Start Backend (Keep terminal open)
+### Option B: Manual
 ```bash
-npm start
+cd backend && npm install && npm start     # terminal 1: API on :3001
+node scripts/serve-ui.js                   # terminal 2: UI on :3000
 ```
-You should see: `🏷️ POS Simulator Backend running on http://localhost:3001`
-
-### Step 3: Start Frontend (New terminal)
-```bash
-cd frontend
-python -m http.server 3000
-```
-You should see: `Serving HTTP on 0.0.0.0 port 3000`
+The UI is served by a small Node static server. `python -m http.server` is not used, because on Windows it can send `index.html` with the wrong content type.
 
 ### Step 4: Open Browser
 Navigate to: **http://localhost:3000**
@@ -93,11 +88,18 @@ pos-simulator/
 ├── frontend/
 │   └── index.html            # Interactive terminal UI
 │
+├── scripts/                  # serve-ui.js (UI on :3000) and the launcher's run-*.ps1 windows
+│
 ├── tests/
-│   ├── package.json          # Playwright dependencies
-│   ├── emv-iso8583.spec.js   # 32+ test cases
-│   ├── playwright.config.js  # Test configuration
-│   └── playwright-report/    # Test results (after running)
+│   ├── *.spec.js             # API specs (EMV, ISO 8583, transactions, history)
+│   ├── support/cards.js      # Shared test data (card expiry)
+│   ├── ui/pages/             # TerminalPage page object (all UI locators)
+│   ├── ui/agent/             # Agent-built UI specs + visual baseline
+│   └── playwright.config.js  # Test configuration
+│
+├── specs/                    # Test plans written by the planner agent
+├── .claude/                  # Agents and guard hooks (see Agentic test kit)
+├── CLAUDE.md                 # Rules every agent follows
 │
 └── lab/                      # QA lab (Docker): Kafka, Postgres, Splunk,
     ├── services/             #   pipeline producer/consumers, traffic, verify
@@ -123,14 +125,20 @@ pos-simulator/
 - Copy-to-clipboard functionality
 
 ### Tests (Playwright)
-- 32+ automated test cases
-- Categories:
-  - EMV Tags validation (3 tests)
-  - ISO 8583 Fields validation (3 tests)
-  - Transaction processing (8 tests)
-  - Data retrieval (3 tests)
-  - API endpoints (3 tests)
-  - Edge cases (3+ tests)
+- **API layer:** EMV tags, ISO 8583 fields, Field 55 inspection, approvals, declines, history, health
+- **UI layer:** page object (`tests/ui/pages/TerminalPage.js`) plus specs for sales, every test card, form validation, backend-down and timeout handling, and a visual baseline
+- `npm run test:ready` from `tests/` runs the ready suite
+
+### Agentic test kit (Claude Code)
+- **Agents:** a test planner (writes `specs/`), a generator (builds page objects and specs) and a healer that may fix **locators only**. It classifies each failure as LOCATOR, TIMING, ASSERTION or ENVIRONMENT, and ASSERTION failures are reported, never "fixed".
+- **Guard hooks** (`.claude/hooks/`) enforce this in the harness, not in a prompt:
+  - Agents can write only to `tests/`, `specs/` and `heal-log/`.
+  - Existing `expect()` lines can't change.
+  - No skips, retries or timeouts.
+  - No shell writes to `backend/` or `frontend/`.
+  - No destructive git.
+  - Visual baselines update only after a one-time human approval.
+- **Audit:** every healer edit is logged to `heal-log/heals.jsonl`. The guards have 25 self-tests (`npm run test:guard`) and were verified live in Claude Code.
 
 ## 🔌 API Endpoints
 
@@ -242,7 +250,7 @@ npx playwright show-report
 | 9F27 | Cryptogram Information Data | Cryptography | 1 byte |
 | ... | ... | ... | ... |
 
-**Total: 25+ tags covering Application, Cryptography, Security, Transaction, Terminal, and Card categories**
+**23 tags in the dictionary; 12 are emitted in DE55. Values are simulated: the cryptogram and unpredictable number are fixed samples.**
 
 ## 📊 ISO 8583 Fields Reference
 
@@ -255,16 +263,14 @@ npx playwright show-report
 | 39 | Response Code | numeric | 2 | Response |
 | ... | ... | ... | ... | ... |
 
-**Total: 64+ fields covering Control, Card, Transaction, Security, and Response categories**
+**22 fields in the reference dictionary. The 0100 message sets DE2, 4, 11, 12, 13, 39, 49 and 55. Known gaps (DE39 on declines, bitmap, PAN masking) are tracked in the [defect log](lab/java-tests/DEFECTS.md).**
 
 ## 🔐 Compliance & Security
 
 - ✅ **Luhn Algorithm** - Card number validation
-- ✅ **EMV Level 1** - Full EMV tag support (25+)
-- ✅ **ISO 8583** - Complete message format (64+ fields)
-- ✅ **TLV Format** - Proper Tag-Length-Value encoding
-- ✅ **Hex Output** - All data in proper hex format
-- ✅ **STAN Uniqueness** - System Trace Audit Number generation
+- ✅ **TLV Format** - Tag-Length-Value encoding and decoding for DE55
+- ✅ **Hex Output** - EMV TLV and ISO 8583 message shown in hex
+- ℹ️ **Simulator only** - Not EMV- or network-certified; cryptograms are not real, and STAN is random, not guaranteed unique
 - ⚠️ **PCI** - Test cards only, but the full PAN is currently returned and stored in the ISO 8583 message ([DEF-003](lab/java-tests/DEFECTS.md))
 
 ## 🛠️ Troubleshooting
