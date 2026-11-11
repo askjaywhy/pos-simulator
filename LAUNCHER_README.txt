@@ -81,7 +81,7 @@ Browser opens automatically to: http://localhost:3000
 
 1. Select a test card from dropdown, OR enter manually:
    Card: 4111111111111111
-   Exp: 12/25
+   Exp: 12/28
    CVV: 123
    Amount: 99.99
 

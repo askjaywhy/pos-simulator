@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { TEST_EXP } = require('./support/cards.js');
 
 const baseURL = 'http://localhost:3001/api';
 
@@ -80,7 +81,7 @@ test.describe('Transaction Processing', () => {
   test('should approve valid transaction', async () => {
     const { status, data } = await apiRequest('POST', '/transactions/process', {
       card_number: '4111111111111111',
-      exp_date: '12/25',
+      exp_date: TEST_EXP,
       cvv: '123',
       amount: 99.99
     });
@@ -96,7 +97,7 @@ test.describe('Transaction Processing', () => {
   test('should include EMV data in response', async () => {
     const { data } = await apiRequest('POST', '/transactions/process', {
       card_number: '4111111111111111',
-      exp_date: '12/25',
+      exp_date: TEST_EXP,
       cvv: '123',
       amount: 99.99
     });
@@ -110,7 +111,7 @@ test.describe('Transaction Processing', () => {
   test('should include ISO 8583 data in response', async () => {
     const { data } = await apiRequest('POST', '/transactions/process', {
       card_number: '4111111111111111',
-      exp_date: '12/25',
+      exp_date: TEST_EXP,
       cvv: '123',
       amount: 99.99
     });
@@ -124,7 +125,7 @@ test.describe('Transaction Processing', () => {
   test('should decline insufficient funds', async () => {
     const { status, data } = await apiRequest('POST', '/transactions/process', {
       card_number: '4000000000000002',
-      exp_date: '12/25',
+      exp_date: TEST_EXP,
       cvv: '123',
       amount: 50.00
     });
@@ -139,7 +140,7 @@ test.describe('Transaction Processing', () => {
   test('should decline lost card', async () => {
     const { status, data } = await apiRequest('POST', '/transactions/process', {
       card_number: '4000000000009987',
-      exp_date: '12/25',
+      exp_date: TEST_EXP,
       cvv: '123',
       amount: 50.00
     });
@@ -154,7 +155,7 @@ test.describe('Transaction Processing', () => {
   test('should validate Luhn checksum', async () => {
     const { status, data } = await apiRequest('POST', '/transactions/process', {
       card_number: '1234567890123456',
-      exp_date: '12/25',
+      exp_date: TEST_EXP,
       cvv: '123',
       amount: 50.00
     });
@@ -192,7 +193,7 @@ test.describe('Transaction Data Retrieval', () => {
   test.beforeAll(async () => {
     const { data } = await apiRequest('POST', '/transactions/process', {
       card_number: '4111111111111111',
-      exp_date: '12/25',
+      exp_date: TEST_EXP,
       cvv: '123',
       amount: 99.99
     });
@@ -253,7 +254,7 @@ test.describe('Edge Cases', () => {
     for (let i = 0; i < 5; i++) {
       const { data } = await apiRequest('POST', '/transactions/process', {
         card_number: '4111111111111111',
-        exp_date: '12/25',
+        exp_date: TEST_EXP,
         cvv: '123',
         amount: Math.random() * 100
       });
@@ -269,7 +270,7 @@ test.describe('Edge Cases', () => {
   test('should handle large amounts', async () => {
     const { status, data } = await apiRequest('POST', '/transactions/process', {
       card_number: '4111111111111111',
-      exp_date: '12/25',
+      exp_date: TEST_EXP,
       cvv: '123',
       amount: 999999.99
     });
@@ -282,7 +283,7 @@ test.describe('Edge Cases', () => {
   test('should handle small amounts', async () => {
     const { status, data } = await apiRequest('POST', '/transactions/process', {
       card_number: '4111111111111111',
-      exp_date: '12/25',
+      exp_date: TEST_EXP,
       cvv: '123',
       amount: 0.01
     });
@@ -295,7 +296,7 @@ test.describe('Edge Cases', () => {
   test('hex values should be valid format', async () => {
     const { data } = await apiRequest('POST', '/transactions/process', {
       card_number: '4111111111111111',
-      exp_date: '12/25',
+      exp_date: TEST_EXP,
       cvv: '123',
       amount: 99.99
     });
@@ -308,7 +309,7 @@ test.describe('Edge Cases', () => {
   test('MTI should be valid format', async () => {
     const { data } = await apiRequest('POST', '/transactions/process', {
       card_number: '4111111111111111',
-      exp_date: '12/25',
+      exp_date: TEST_EXP,
       cvv: '123',
       amount: 99.99
     });

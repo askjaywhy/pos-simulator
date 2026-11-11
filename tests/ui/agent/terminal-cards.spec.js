@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures.js';
+import { TEST_EXP } from '../../support/cards.js';
 
 // Card-outcome coverage. Full PANs live only in this constant block; titles use the last 4.
 // Requires the simulator running (UI :3000, API :3001).
@@ -75,7 +76,7 @@ test.describe('terminal card outcomes', () => {
     await terminal.selectTestCard(PAN.discover1117);
     await expect(terminal.cardNumber).toHaveValue(PAN.discover1117);
 
-    await terminal.expiry.fill('12/25');
+    await terminal.expiry.fill(TEST_EXP);
     await terminal.cvv.fill('123');
     await terminal.amount.fill('20');
     await terminal.submit.click();

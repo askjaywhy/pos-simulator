@@ -1,4 +1,5 @@
 import { expect } from '@playwright/test';
+import { TEST_EXP } from '../../support/cards.js';
 
 // Page object for the POS terminal UI (frontend/index.html).
 // All UI locators for the agent-built suite live here. The healer may edit this file;
@@ -43,7 +44,7 @@ export class TerminalPage {
     await expect(this.submit).toBeVisible();
   }
 
-  async pay({ number, exp = '12/25', cvv = '123', amount }) {
+  async pay({ number, exp = TEST_EXP, cvv = '123', amount }) {
     await this.cardNumber.fill(number);
     await this.expiry.fill(exp);
     await this.cvv.fill(cvv);

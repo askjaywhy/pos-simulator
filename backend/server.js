@@ -120,12 +120,12 @@ function maskCardNumber(cardNumber) {
 
 // Test cards for reference
 const TEST_CARDS = [
-  { number: '4111111111111111', exp: '12/25', cvv: '123', status: 'APPROVED', brand: 'VISA' },
-  { number: '5555555555554444', exp: '12/25', cvv: '123', status: 'APPROVED', brand: 'MASTERCARD' },
-  { number: '378282246310005', exp: '12/25', cvv: '123', status: 'APPROVED', brand: 'AMEX' },
-  { number: '6011111111111117', exp: '12/25', cvv: '123', status: 'APPROVED', brand: 'DISCOVER' },
-  { number: '4000000000000002', exp: '12/25', cvv: '123', status: 'DECLINED', reason: 'Insufficient Funds' },
-  { number: '4000000000009987', exp: '12/25', cvv: '123', status: 'DECLINED', reason: 'Lost Card' }
+  { number: '4111111111111111', exp: '12/28', cvv: '123', status: 'APPROVED', brand: 'VISA' },
+  { number: '5555555555554444', exp: '12/28', cvv: '123', status: 'APPROVED', brand: 'MASTERCARD' },
+  { number: '378282246310005', exp: '12/28', cvv: '123', status: 'APPROVED', brand: 'AMEX' },
+  { number: '6011111111111117', exp: '12/28', cvv: '123', status: 'APPROVED', brand: 'DISCOVER' },
+  { number: '4000000000000002', exp: '12/28', cvv: '123', status: 'DECLINED', reason: 'Insufficient Funds' },
+  { number: '4000000000009987', exp: '12/28', cvv: '123', status: 'DECLINED', reason: 'Lost Card' }
 ];
 
 // Routes

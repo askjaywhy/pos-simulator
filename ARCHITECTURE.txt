@@ -116,7 +116,7 @@
 │                            DATA FLOW EXAMPLE                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  1. User enters card: 4111111111111111, Exp: 12/25, CVV: 123, Amount: 99.99│
+│  1. User enters card: 4111111111111111, Exp: 12/28, CVV: 123, Amount: 99.99│
 │     └─ Frontend sends POST /api/transactions/process                       │
 │                                                                             │
 │  2. Server validates:                                                      │

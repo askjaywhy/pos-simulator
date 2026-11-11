@@ -171,7 +171,7 @@ Go to: **http://localhost:3000**
 
 **Enter Test Card Details:**
 - Card Number: `4111111111111111`
-- Expiration: `12/25`
+- Expiration: `12/28`
 - CVV: `123`
 - Amount: `99.99`
 

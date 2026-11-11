@@ -1,9 +1,10 @@
 import { test, expect } from '@playwright/test';
+import { TEST_EXP } from './support/cards.js';
 
 test('Approved Visa transaction processes successfully', async ({ request }) => {
   const payload = {
     card_number: '4111111111111111',
-    exp_date: '12/25',
+    exp_date: TEST_EXP,
     cvv: '123',
     amount: 12.34
   };

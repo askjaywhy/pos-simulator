@@ -74,7 +74,7 @@ Navigate to: **http://localhost:3000**
 
 ### Step 5: Test a Transaction
 1. Enter test card: `4111 1111 1111 1111`
-2. Exp: `12/25`
+2. Exp: `12/28`
 3. CVV: `123`
 4. Amount: `99.99`
 5. Click **PROCESS TRANSACTION**
