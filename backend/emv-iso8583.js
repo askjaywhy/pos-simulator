@@ -53,6 +53,18 @@ const ISO8583_FIELDS = {
 };
 
 // ------------------------
+// PAN truncation (PCI DSS Req. 3.4: show at most first 6 / last 4)
+// ------------------------
+
+// DEF-003: the full PAN stays inside the message object; everything that leaves it
+// (API response, hex_message, SQLite) carries the truncated form, e.g. 411111******1111.
+function maskPan(pan) {
+  const digits = String(pan || '');
+  if (digits.length < 13) return '*'.repeat(digits.length);
+  return digits.slice(0, 6) + '*'.repeat(digits.length - 10) + digits.slice(-4);
+}
+
+// ------------------------
 // TLV Utilities
 // ------------------------
 
@@ -251,9 +263,9 @@ class ISO8583Message {
     return this.fieldDefinitions;
   }
 
-  toHex() {
+  toHex(fields = this.fields) {
     let hex = this.mti + this.bitmap;
-    for (const [field, value] of Object.entries(this.fields)) {
+    for (const [field, value] of Object.entries(fields)) {
       const str = value.toString();
       hex += Buffer.from(str, 'utf8').toString('hex').toUpperCase();
     }
@@ -424,12 +436,16 @@ class EMVTransaction {
     const fields = {};
     const fieldDefs = this.iso8583Message.getFields();
 
+    // DEF-003: never emit the full PAN. Everything returned here is also what gets stored.
+    const outFields = { ...this.iso8583Message.fields };
+    if (outFields['2']) outFields['2'] = maskPan(outFields['2']);
+
     for (const [fieldNum, fieldDef] of Object.entries(fieldDefs)) {
       const fieldNumInt = parseInt(fieldNum, 10);
       if ([2, 4, 11, 12, 13, 39, 49, 55].includes(fieldNumInt)) {
         fields[fieldNum] = {
           name: fieldDef.name,
-          value: this.iso8583Message.fields[fieldNum] || '',
+          value: outFields[fieldNum] || '',
           type: fieldDef.type
         };
       }
@@ -439,7 +455,7 @@ class EMVTransaction {
       mti: this.iso8583Message.mti,
       bitmap: this.iso8583Message.getBitmap(),
       fields: fields,
-      hex_message: this.iso8583Message.toHex()
+      hex_message: this.iso8583Message.toHex(outFields)
     };
   }
 
@@ -467,6 +483,7 @@ module.exports = {
   EMVTags,
   ISO8583Message,
   EMVTransaction,
+  maskPan,
   buildTLV,
   decodeTLV,
   prettyPrintTLV,

@@ -47,20 +47,15 @@ class KnownDefectsTest {
     }
 
     @Test
-    @DisplayName("DEF-003 full PAN is never returned or stored (PCI DSS)")
-    void panIsMasked() {
-        Response r = Api.pay(Cards.VISA, 12.00, MERCHANT);
-        String id = r.path("transaction_id");
-
-        r.then()
-                .body("iso8583.fields.'2'.value", not(equalTo(Cards.VISA)))
-                .body("iso8583.hex_message", not(containsString(Cards.VISA)));
-
-        given().spec(Api.pos())
-                .when().get("/transactions/{id}", id)
+    @DisplayName("DEF-008 primary bitmap marks exactly the data elements present")
+    void bitmapMatchesFields() {
+        // The 0100 carries DE2, 4, 11, 12, 13, 39, 49 and 55. In a 64-bit primary bitmap
+        // (bit 1 = MSB) those bits give 5038000002008200. The simulator emits 5380028200000000
+        // because setBitmapBit() indexes hex characters as if they were bytes.
+        given().spec(Api.pos()).body(Api.payment(Cards.VISA, 10.00, MERCHANT))
+                .when().post("/transactions/process")
                 .then().statusCode(200)
-                .body("iso8583_message.fields.'2'.value", not(equalTo(Cards.VISA)))
-                .body("iso8583_message.hex_message", not(containsString(Cards.VISA)));
+                .body("iso8583.hex_message", startsWith("0100" + "5038000002008200"));
     }
 
     @Test

@@ -159,4 +159,32 @@ class SimulatorApiTest {
                 .body("amount", equalTo(75.5f))
                 .body("refund_id", notNullValue());
     }
+
+    /** Hex of a string's ASCII bytes: how hex_message encodes each field value. */
+    private static String asciiHex(String s) {
+        StringBuilder sb = new StringBuilder();
+        for (char c : s.toCharArray()) sb.append(String.format("%02X", (int) c));
+        return sb.toString();
+    }
+
+    @Test
+    @DisplayName("PAN is truncated in DE2, hex_message and storage (DEF-003, PCI DSS)")
+    void panIsMasked() {
+        String masked = "411111******1111";
+        Response r = Api.pay(Cards.VISA, 12.00, MERCHANT);
+        String id = r.path("transaction_id");
+
+        r.then()
+                .body("iso8583.fields.'2'.value", equalTo(masked))
+                .body("iso8583.hex_message", not(containsString(asciiHex(Cards.VISA))))
+                .body("iso8583.hex_message", containsString(asciiHex(masked)));
+
+        String stored = given().spec(Api.pos())
+                .when().get("/transactions/{id}", id)
+                .then().statusCode(200)
+                .body("iso8583_message.fields.'2'.value", equalTo(masked))
+                .extract().asString();
+        org.junit.jupiter.api.Assertions.assertFalse(stored.contains(Cards.VISA), "stored row contains the full PAN");
+        org.junit.jupiter.api.Assertions.assertFalse(stored.contains(asciiHex(Cards.VISA)), "stored hex_message contains the full PAN");
+    }
 }

@@ -14,14 +14,15 @@ The [`lab/`](lab/) folder turns the simulator into an end-to-end payments QA env
 | **Monitoring** | Splunk dashboards for approval rate, declines by DE39, fraud alerts, rule precision and chargeback outcomes | SQL data-quality checks |
 
 ### Defects found
-API testing uncovered **7 defects in the simulator**, each with steps, expected vs. actual, root cause and fix, plus an automated test that fails until it's fixed. See [`lab/java-tests/DEFECTS.md`](lab/java-tests/DEFECTS.md).
+API testing uncovered **8 defects in the simulator**, each with steps, expected vs. actual, root cause and fix, plus an automated test that fails until it's fixed. See [`lab/java-tests/DEFECTS.md`](lab/java-tests/DEFECTS.md).
 
 | ID | Defect | Severity |
 |---|---|---|
 | DEF-001 | ISO 8583 DE4 loses a cent on amounts like $19.99 (floating-point `Math.floor`) | High |
 | DEF-002 | DE39 is always `00`, even on declined transactions | High |
-| DEF-003 | Full PAN returned by the API and stored unmasked | Critical (PCI DSS) |
+| DEF-003 | Full PAN returned by the API and stored unmasked (**fixed**: DE2 truncated to first 6 / last 4) | Critical (PCI DSS) |
 | DEF-004–007 | Invalid expiry month accepted, expired card approved, negative amount approved, declined transaction refundable | Medium–High |
+| DEF-008 | ISO 8583 primary bitmap wrong for data elements 9 and up | High |
 
 ### Run it
 ```powershell
@@ -263,7 +264,7 @@ npx playwright show-report
 | 39 | Response Code | numeric | 2 | Response |
 | ... | ... | ... | ... | ... |
 
-**22 fields in the reference dictionary. The 0100 message sets DE2, 4, 11, 12, 13, 39, 49 and 55. Known gaps (DE39 on declines, bitmap, PAN masking) are tracked in the [defect log](lab/java-tests/DEFECTS.md).**
+**22 fields in the reference dictionary. The 0100 message sets DE2 (truncated), 4, 11, 12, 13, 39, 49 and 55. Known gaps (DE39 on declines, bitmap) are tracked in the [defect log](lab/java-tests/DEFECTS.md).**
 
 ## 🔐 Compliance & Security
 
@@ -271,7 +272,7 @@ npx playwright show-report
 - ✅ **TLV Format** - Tag-Length-Value encoding and decoding for DE55
 - ✅ **Hex Output** - EMV TLV and ISO 8583 message shown in hex
 - ℹ️ **Simulator only** - Not EMV- or network-certified; cryptograms are not real, and STAN is random, not guaranteed unique
-- ⚠️ **PCI** - Test cards only, but the full PAN is currently returned and stored in the ISO 8583 message ([DEF-003](lab/java-tests/DEFECTS.md))
+- ✅ **PCI** - Test cards only; the PAN is truncated to first 6 / last 4 in DE2, `hex_message` and storage ([DEF-003](lab/java-tests/DEFECTS.md), fixed)
 
 ## 🛠️ Troubleshooting
 

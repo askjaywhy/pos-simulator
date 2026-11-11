@@ -11,11 +11,12 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 |---|---|---|---|
 | DEF-001 | ISO 8583 DE4 amount loses a cent for some values | High | Financial accuracy |
 | DEF-002 | DE39 is always `00`, even on declined transactions | High | ISO 8583 / reconciliation |
-| DEF-003 | Full PAN returned by the API and stored unmasked | Critical | PCI DSS |
+| DEF-003 | Full PAN returned by the API and stored unmasked (**fixed**) | Critical | PCI DSS |
 | DEF-004 | Invalid expiry month (13) accepted | Medium | Input validation |
 | DEF-005 | Expired card approved | High | Authorization rules |
 | DEF-006 | Negative amount approved | High | Input validation |
 | DEF-007 | Declined transaction can be refunded | High | Refunds |
+| DEF-008 | ISO 8583 primary bitmap wrong for data elements 9 and up | High | ISO 8583 |
 
 ---
 
@@ -41,6 +42,7 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 **Expected:** DE2 masked or truncated (for example `411111******1111`) and the PAN absent from `hex_message`. Only the masked or tokenized PAN stored.
 **Actual:** DE2 contains the full 16-digit PAN in the response, in `hex_message`, and in the `iso8583_message` column in SQLite, even though `card_number_masked` is stored separately.
 **Fix:** mask DE2 in API responses and storage. Never persist the full PAN; use tokenization if it must be recoverable.
+**Status:** Fixed. `getISO8583Data()` now truncates DE2 to first 6 / last 4 (`411111******1111`) and builds `hex_message` from the truncated value; the response, SQLite and the history endpoints all use that output. Regression tests: `SimulatorApiTest.panIsMasked` and `tests/pan-masking.spec.js`. The old known-defect check on `hex_message` could never fail (the hex encodes ASCII, so the PAN appears as `3431…`, not `4111…`); the regression test checks the hex form.
 
 ### DEF-004 Invalid expiry month accepted
 **Severity:** Medium
@@ -69,3 +71,11 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 **Expected:** HTTP 409 or 422.
 **Actual:** HTTP 200, `status: REFUNDED`. The endpoint also never records the refund, so the same transaction can be refunded any number of times.
 **Fix:** allow refunds only for APPROVED transactions, persist refunds, and cap the total refunded at the original amount.
+
+### DEF-008 ISO 8583 primary bitmap wrong for data elements 9 and up
+**Severity:** High. A host parsing the bitmap would look for the wrong data elements, so the message can't be decoded.
+**Steps:** process Visa 4111…1111. Read characters 5–20 of `iso8583.hex_message` (the bitmap).
+**Expected:** `5038000002008200`. The message carries DE2, 4, 11, 12, 13, 39, 49 and 55.
+**Actual:** `5380028200000000`.
+**Root cause:** `ISO8583Message.setBitmapBit()` computes `byteIndex = floor((n-1)/8)` and uses it as an index into the 16-character hex string, so byte N is read from hex characters N and N+1 instead of 2N and 2N+1. DE2–DE8 come out right by luck; every bit from DE9 up lands in the wrong place.
+**Fix:** use `byteIndex * 2` as the character offset, or keep the bitmap as a 64-bit `BigInt` and format it at the end.
