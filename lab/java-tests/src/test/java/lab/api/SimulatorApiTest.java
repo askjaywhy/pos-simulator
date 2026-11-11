@@ -210,4 +210,26 @@ class SimulatorApiTest {
                 .then().statusCode(200)
                 .body("iso8583_message.fields.'39'.value", equalTo(code));
     }
+
+    @ParameterizedTest(name = "DE4 encodes {0} as {1} (DEF-001)")
+    @CsvSource({
+            "19.99,   000000001999",
+            "0.29,    000000000029",
+            "4.35,    000000000435",
+            "1.15,    000000000115",
+            "0.01,    000000000001",
+            "1234.56, 000000123456"
+    })
+    void de4AmountPrecision(double amount, String expected) {
+        String id = given().spec(Api.pos()).body(Api.payment(Cards.VISA, amount, MERCHANT))
+                .when().post("/transactions/process")
+                .then().statusCode(200)
+                .body("iso8583.fields.'4'.value", equalTo(expected))
+                .extract().path("transaction_id");
+
+        given().spec(Api.pos())
+                .when().get("/transactions/{id}", id)
+                .then().statusCode(200)
+                .body("iso8583_message.fields.'4'.value", equalTo(expected));
+    }
 }

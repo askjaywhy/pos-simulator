@@ -9,7 +9,7 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 
 | ID | Title | Severity | Area |
 |---|---|---|---|
-| DEF-001 | ISO 8583 DE4 amount loses a cent for some values | High | Financial accuracy |
+| DEF-001 | ISO 8583 DE4 amount loses a cent for some values (**fixed**) | High | Financial accuracy |
 | DEF-002 | DE39 is always `00`, even on declined transactions (**fixed**) | High | ISO 8583 / reconciliation |
 | DEF-003 | Full PAN returned by the API and stored unmasked (**fixed**) | Critical | PCI DSS |
 | DEF-004 | Invalid expiry month (13) accepted | Medium | Input validation |
@@ -27,6 +27,7 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 **Actual:** `000000001998`. The same happens for 0.29, 4.35 and 1.15.
 **Root cause:** `emv-iso8583.js` uses `Math.floor(this.amount * 100)`. In binary floating point, `19.99 * 100` = `1998.9999999999998`, and `floor` drops a cent.
 **Fix:** use `Math.round(amount * 100)`, or better, carry amounts as integer minor units (cents) end to end.
+**Status:** Fixed. `buildTransaction()` now uses `Math.round(Number(amount) * 100)`. That is exact for any amount with at most 2 decimals; amounts with more decimals are DEF-006's job to reject. Regression tests: `SimulatorApiTest.de4AmountPrecision` (19.99, 0.29, 4.35, 1.15, 0.01, 1234.56) and `tests/de4-amount.spec.js`.
 
 ### DEF-002 DE39 is always `00`, even on declined transactions
 **Severity:** High. The ISO message says "approved" while the API says "declined", so downstream systems that read DE39 will treat declines as approvals.

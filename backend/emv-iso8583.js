@@ -313,7 +313,8 @@ class EMVTransaction {
     this.iso8583Message.setField('2', this.cardNumber);
     this.iso8583Message.setField(
       '4',
-      Math.floor(this.amount * 100).toString().padStart(12, '0')
+      // DEF-001: round, don't floor. 19.99 * 100 = 1998.9999999999998 in binary floating point.
+      Math.round(Number(this.amount) * 100).toString().padStart(12, '0')
     );
     this.iso8583Message.setField('11', this.stan);
     this.iso8583Message.setField('39', '00'); // Approved

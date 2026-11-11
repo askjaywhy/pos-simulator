@@ -26,16 +26,6 @@ class KnownDefectsTest {
 
     private static final String MERCHANT = "JAVA-DEFECT-" + Api.RUN;
 
-    @ParameterizedTest(name = "DEF-001 DE4 encodes ${0} exactly")
-    @ValueSource(doubles = {19.99, 0.29, 4.35, 1.15})
-    void de4AmountPrecision(double amount) {
-        String expected = String.format("%012d", Math.round(amount * 100));
-        given().spec(Api.pos()).body(Api.payment(Cards.VISA, amount, MERCHANT))
-                .when().post("/transactions/process")
-                .then().statusCode(200)
-                .body("iso8583.fields.'4'.value", equalTo(expected));
-    }
-
     @Test
     @DisplayName("DEF-008 primary bitmap marks exactly the data elements present")
     void bitmapMatchesFields() {
