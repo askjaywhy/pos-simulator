@@ -16,7 +16,7 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 | DEF-005 | Expired card approved | High | Authorization rules |
 | DEF-006 | Negative amount approved | High | Input validation |
 | DEF-007 | Declined transaction can be refunded | High | Refunds |
-| DEF-008 | ISO 8583 primary bitmap wrong for data elements 9 and up | High | ISO 8583 |
+| DEF-008 | ISO 8583 primary bitmap wrong for data elements 9 and up (**fixed**) | High | ISO 8583 |
 
 ---
 
@@ -81,3 +81,4 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 **Actual:** `5380028200000000`.
 **Root cause:** `ISO8583Message.setBitmapBit()` computes `byteIndex = floor((n-1)/8)` and uses it as an index into the 16-character hex string, so byte N is read from hex characters N and N+1 instead of 2N and 2N+1. DE2–DE8 come out right by luck; every bit from DE9 up lands in the wrong place.
 **Fix:** use `byteIndex * 2` as the character offset, or keep the bitmap as a 64-bit `BigInt` and format it at the end.
+**Status:** Fixed. `setBitmapBit()` now reads and writes hex characters `2N` and `2N+1`, and marks DE2–DE64 (DE64 was previously excluded). Regression tests: `SimulatorApiTest.bitmapMatchesFields` (decodes the bitmap and compares it with the fields returned, for an approval and a decline) and `tests/iso8583-bitmap.spec.js`.

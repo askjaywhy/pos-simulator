@@ -242,16 +242,18 @@ class ISO8583Message {
   }
 
   setBitmapBit(fieldNumber) {
-    if (fieldNumber > 0 && fieldNumber < 64) {
+    // DEF-008: the primary bitmap is 8 bytes held as 16 hex characters, so byte N lives at
+    // hex characters 2N and 2N+1. (The old code read characters N and N+1, which misplaced
+    // every bit from DE9 up.) Bit 1 flags a secondary bitmap and is never set here, and
+    // DE65-128 are not supported, so only DE2-DE64 are marked.
+    if (fieldNumber >= 2 && fieldNumber <= 64) {
       const byteIndex = Math.floor((fieldNumber - 1) / 8);
       const bitIndex = 7 - ((fieldNumber - 1) % 8);
-      const byteArray = this.bitmap.split('');
-      const byteValue = parseInt(byteArray[byteIndex] + byteArray[byteIndex + 1], 16);
-      const newValue = byteValue | (1 << bitIndex);
-      const hex = newValue.toString(16).padStart(2, '0').toUpperCase();
-      byteArray[byteIndex] = hex.charAt(0);
-      byteArray[byteIndex + 1] = hex.charAt(1);
-      this.bitmap = byteArray.join('');
+      const pos = byteIndex * 2;
+      const byteValue = parseInt(this.bitmap.substr(pos, 2), 16) | (1 << bitIndex);
+      this.bitmap = this.bitmap.slice(0, pos)
+        + byteValue.toString(16).padStart(2, '0').toUpperCase()
+        + this.bitmap.slice(pos + 2);
     }
   }
 

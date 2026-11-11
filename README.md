@@ -22,7 +22,7 @@ API testing uncovered **8 defects in the simulator**, each with steps, expected 
 | DEF-002 | DE39 is always `00`, even on declined transactions (**fixed**: DE39 and tag 8A carry the decision) | High |
 | DEF-003 | Full PAN returned by the API and stored unmasked (**fixed**: DE2 truncated to first 6 / last 4) | Critical (PCI DSS) |
 | DEF-004–007 | Invalid expiry month accepted, expired card approved, negative amount approved, declined transaction refundable | Medium–High |
-| DEF-008 | ISO 8583 primary bitmap wrong for data elements 9 and up | High |
+| DEF-008 | ISO 8583 primary bitmap wrong for data elements 9 and up (**fixed**) | High |
 
 ### Run it
 ```powershell
@@ -264,7 +264,7 @@ npx playwright show-report
 | 39 | Response Code | numeric | 2 | Response |
 | ... | ... | ... | ... | ... |
 
-**22 fields in the reference dictionary. The 0100 message sets DE2 (truncated), 4, 11, 12, 13, 39, 49 and 55. Known gaps (bitmap) are tracked in the [defect log](lab/java-tests/DEFECTS.md).**
+**22 fields in the reference dictionary. The 0100 message sets DE2 (truncated), 4, 11, 12, 13, 39, 49 and 55. Open defects are tracked in the [defect log](lab/java-tests/DEFECTS.md).**
 
 ## 🔐 Compliance & Security
 

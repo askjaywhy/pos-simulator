@@ -232,4 +232,29 @@ class SimulatorApiTest {
                 .then().statusCode(200)
                 .body("iso8583_message.fields.'4'.value", equalTo(expected));
     }
+
+    @ParameterizedTest(name = "primary bitmap marks exactly the fields present for {0} (DEF-008)")
+    @CsvSource({"4111111111111111", "4000000000000002"})
+    void bitmapMatchesFields(String card) {
+        Response r = Api.pay(card, 10.00, MERCHANT);
+        String hex = r.path("iso8583.hex_message");
+
+        // The 0100 carries DE2, 4, 11, 12, 13, 39, 49 and 55: bits 2, 4, 11, 12, 13, 39, 49, 55
+        // of a 64-bit primary bitmap (bit 1 = most significant).
+        org.junit.jupiter.api.Assertions.assertEquals("5038000002008200", hex.substring(4, 20));
+
+        // Property check: decode the bitmap and compare it with the fields actually returned.
+        long bitmap = Long.parseUnsignedLong(hex.substring(4, 20), 16);
+        java.util.Set<Integer> fromBitmap = new java.util.TreeSet<>();
+        for (int bit = 1; bit <= 64; bit++) {
+            if ((bitmap & (1L << (64 - bit))) != 0) fromBitmap.add(bit);
+        }
+        Map<String, Map<String, Object>> fields = r.path("iso8583.fields");
+        java.util.Set<Integer> present = new java.util.TreeSet<>();
+        fields.forEach((num, f) -> {
+            Object v = f.get("value");
+            if (v != null && !String.valueOf(v).isEmpty()) present.add(Integer.parseInt(num));
+        });
+        org.junit.jupiter.api.Assertions.assertEquals(present, fromBitmap);
+    }
 }
