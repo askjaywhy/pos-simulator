@@ -65,6 +65,30 @@ function maskPan(pan) {
 }
 
 // ------------------------
+// Card expiry (DEF-005)
+// ------------------------
+
+// "Now" for authorization. SIM_NOW pins it for tests (any Date-parsable value,
+// e.g. 2028-12-31T23:59:59Z); otherwise the real clock. An invalid SIM_NOW is ignored.
+function simNow() {
+  const pinned = process.env.SIM_NOW;
+  if (pinned) {
+    const d = new Date(pinned);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return new Date();
+}
+
+// A card with expiry MM/YY is valid through the last day of that month (20YY).
+// Compared in UTC, like DE12/13. Expects a format- and month-validated "MM/YY".
+function isCardExpired(expMMYY, now = simNow()) {
+  const [mm, yy] = String(expMMYY).split('/').map(Number);
+  const expMonthIndex = (2000 + yy) * 12 + (mm - 1);
+  const nowMonthIndex = now.getUTCFullYear() * 12 + now.getUTCMonth();
+  return nowMonthIndex > expMonthIndex;
+}
+
+// ------------------------
 // TLV Utilities
 // ------------------------
 
@@ -501,6 +525,8 @@ module.exports = {
   ISO8583Message,
   EMVTransaction,
   maskPan,
+  isCardExpired,
+  simNow,
   buildTLV,
   decodeTLV,
   prettyPrintTLV,

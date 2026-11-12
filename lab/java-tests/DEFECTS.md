@@ -13,7 +13,7 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 | DEF-002 | DE39 is always `00`, even on declined transactions (**fixed**) | High | ISO 8583 / reconciliation |
 | DEF-003 | Full PAN returned by the API and stored unmasked (**fixed**) | Critical | PCI DSS |
 | DEF-004 | Invalid expiry month (13) accepted (**fixed**) | Medium | Input validation |
-| DEF-005 | Expired card approved | High | Authorization rules |
+| DEF-005 | Expired card approved (**fixed**) | High | Authorization rules |
 | DEF-006 | Negative amount approved (**fixed**) | High | Input validation |
 | DEF-007 | Declined transaction can be refunded | High | Refunds |
 | DEF-008 | ISO 8583 primary bitmap wrong for data elements 9 and up (**fixed**) | High | ISO 8583 |
@@ -58,8 +58,9 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 **Severity:** High
 **Steps:** process Visa with `exp_date: "01/20"`.
 **Expected:** declined, DE39 `54` (Expired Card).
-**Actual:** approved `00`. The published test cards themselves use `12/25`, which is already in the past.
+**Actual:** approved `00`. The published test cards themselves used `12/25`, which was already in the past (moved to `12/28` in `d26677b`).
 **Fix:** compare the expiry against the current month and decline with `54`.
+**Status:** Fixed. A card is valid through the last day of its expiry month (UTC). After the exact-PAN decline rules, `isCardExpired()` declines it `54` `Expired Card` (DE39 and tag `8A` too). "Now" comes from `simNow()`: the real clock, or the `SIM_NOW` environment variable when set (e.g. `SIM_NOW=2028-12-31T23:59:59Z`), so tests can pin the date and the `12/28` test cards don't silently expire. Regression tests: `SimulatorApiTest.expiredCardDeclined`, `expiredLastMonthDeclined`, `expiringThisMonthApproved`, `declineRuleBeatsExpiry`, and `tests/expiry-date.spec.js` (including boundary unit tests of `isCardExpired`).
 
 ### DEF-006 Negative amount approved
 **Severity:** High

@@ -3,7 +3,7 @@ const sqlite3 = require('sqlite3').verbose();
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const { EMVTags, ISO8583Message, EMVTransaction } = require('./emv-iso8583');
+const { EMVTags, ISO8583Message, EMVTransaction, isCardExpired, simNow } = require('./emv-iso8583');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -228,6 +228,12 @@ app.post('/api/transactions/process', (req, res) => {
         responseCode = row.response_code;
         declineReason = row.decline_reason;
         authCode = null;
+      } else if (isCardExpired(exp_date)) {
+        // DEF-005: an exact-PAN decline rule wins; otherwise an expired card is declined 54
+        status = 'DECLINED';
+        responseCode = '54';
+        declineReason = 'Expired Card';
+        authCode = null;
       } else {
         status = 'APPROVED';
         responseCode = '00';
@@ -443,6 +449,9 @@ initializeDatabase().then(() => {
 
   app.listen(PORT, () => {
     // Server started
+    if (process.env.SIM_NOW) {
+      console.log(`  SIM_NOW set: authorization date pinned to ${simNow().toISOString()}`);
+    }
   });
 }).catch(err => {
   console.error('❌ Failed to initialize database:', err);

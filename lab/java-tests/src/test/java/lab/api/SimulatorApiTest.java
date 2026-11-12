@@ -307,4 +307,50 @@ class SimulatorApiTest {
                 .then().statusCode(200)
                 .body("status", equalTo("APPROVED"));
     }
+
+    /** MM/YY for a month relative to now, in UTC like the simulator (assumes SIM_NOW is not set). */
+    private static String expiry(int monthsFromNow) {
+        java.time.YearMonth ym = java.time.YearMonth.now(java.time.ZoneOffset.UTC).plusMonths(monthsFromNow);
+        return String.format("%02d/%02d", ym.getMonthValue(), ym.getYear() % 100);
+    }
+
+    private Response payWithExpiry(String card, String exp) {
+        Map<String, Object> body = Api.payment(card, 10.00, MERCHANT);
+        body.put("exp_date", exp);
+        return given().spec(Api.pos()).body(body).when().post("/transactions/process");
+    }
+
+    @Test
+    @DisplayName("expired card (01/20) is declined 54 in the API, DE39 and tag 8A (DEF-005)")
+    void expiredCardDeclined() {
+        payWithExpiry(Cards.VISA, "01/20").then().statusCode(200)
+                .body("status", equalTo("DECLINED"))
+                .body("response_code", equalTo("54"))
+                .body("decline_reason", equalTo("Expired Card"))
+                .body("auth_code", nullValue())
+                .body("iso8583.fields.'39'.value", equalTo("54"))
+                .body("emv.tags.'8A'.value", equalTo("3534"));
+    }
+
+    @Test
+    @DisplayName("card that expired last month is declined 54 (DEF-005)")
+    void expiredLastMonthDeclined() {
+        payWithExpiry(Cards.VISA, expiry(-1)).then().statusCode(200)
+                .body("response_code", equalTo("54"));
+    }
+
+    @Test
+    @DisplayName("card expiring this month is still approved (DEF-005)")
+    void expiringThisMonthApproved() {
+        payWithExpiry(Cards.VISA, expiry(0)).then().statusCode(200)
+                .body("status", equalTo("APPROVED"))
+                .body("response_code", equalTo("00"));
+    }
+
+    @Test
+    @DisplayName("a decline rule takes precedence over expiry: •••• 0002 with 01/20 is 51 (DEF-005)")
+    void declineRuleBeatsExpiry() {
+        payWithExpiry(Cards.VISA_INSUFFICIENT_FUNDS, "01/20").then().statusCode(200)
+                .body("response_code", equalTo("51"));
+    }
 }

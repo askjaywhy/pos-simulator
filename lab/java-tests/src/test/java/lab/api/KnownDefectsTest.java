@@ -27,18 +27,6 @@ class KnownDefectsTest {
     private static final String MERCHANT = "JAVA-DEFECT-" + Api.RUN;
 
     @Test
-    @DisplayName("DEF-005 expired card is declined with 54")
-    void expiredCardDeclined() {
-        Map<String, Object> body = Api.payment(Cards.VISA, 10.00, MERCHANT);
-        body.put("exp_date", "01/20");
-        given().spec(Api.pos()).body(body)
-                .when().post("/transactions/process")
-                .then().statusCode(200)
-                .body("status", equalTo("DECLINED"))
-                .body("response_code", equalTo("54"));
-    }
-
-    @Test
     @DisplayName("DEF-007 declined transaction cannot be refunded")
     void refundOfDeclinedRejected() {
         String id = Api.pay(Cards.VISA_LOST, 30.00, MERCHANT).path("transaction_id");
