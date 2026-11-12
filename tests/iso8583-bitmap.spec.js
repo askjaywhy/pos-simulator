@@ -31,8 +31,8 @@ test.describe('ISO 8583 primary bitmap (DEF-008)', () => {
       const { iso8583 } = await res.json();
       const bitmap = iso8583.hex_message.slice(4, 20);
 
-      // DE2, 4, 11, 12, 13, 39, 49, 55
-      expect(bitmap).toBe('5038000002008200');
+      // DE2, 3, 4, 11, 12, 13, 39, 41, 42, 49, 55 (DE3/41/42 added by the message-model work)
+      expect(bitmap).toBe('7038000002C08200');
       expect(bitsFromBitmap(bitmap)).toEqual(fieldsPresent(iso8583.fields));
     });
   }

@@ -2,7 +2,8 @@
 // EMV + ISO 8583 with realistic TLV, scheme-flavored sample data
 
 const EMV_TAGS = {
-  '9F06': { name: 'Application Dedicated File (AID)', category: 'Application' },
+  '9F06': { name: 'Application Identifier (AID) - terminal', category: 'Application' },
+  '5F2A': { name: 'Transaction Currency Code', category: 'Transaction' },
   '9F26': { name: 'Application Cryptogram', category: 'Cryptography' },
   '95':   { name: 'Terminal Verification Results (TVR)', category: 'Security' },
   '9B':   { name: 'Transaction Status Information (TSI)', category: 'Security' },
@@ -36,6 +37,8 @@ const ISO8583_FIELDS = {
   '11':  { name: 'System Trace Audit Number (STAN)', type: 'numeric', length: 6, category: 'Transaction' },
   '12':  { name: 'Time, Transaction (hhmmss)', type: 'numeric', length: 6, category: 'Transaction' },
   '13':  { name: 'Date, Transaction (MMDD)', type: 'numeric', length: 4, category: 'Transaction' },
+  '37':  { name: 'Retrieval Reference Number', type: 'alphanumeric', length: 12, category: 'Transaction' },
+  '38':  { name: 'Authorization Identification Response', type: 'alphanumeric', length: 6, category: 'Response' },
   '39':  { name: 'Response Code', type: 'numeric', length: 2, category: 'Response' },
   '41':  { name: 'Card Acceptor Terminal Identification', type: 'alphanumeric', length: 8, category: 'Terminal' },
   '42':  { name: 'Card Acceptor Identification Code', type: 'alphanumeric', length: 15, category: 'Merchant' },
@@ -87,6 +90,43 @@ function isCardExpired(expMMYY, now = simNow()) {
   const nowMonthIndex = now.getUTCFullYear() * 12 + now.getUTCMonth();
   return nowMonthIndex > expMonthIndex;
 }
+
+// ------------------------
+// Message helpers
+// ------------------------
+
+// DE49 / tag 5F2A: ISO 4217 numeric codes. Only 2-decimal currencies, because DE4 is built
+// as amount * 100 (a 0-decimal currency such as JPY would need a different exponent).
+const CURRENCIES = { USD: '840', EUR: '978', GBP: '826', CAD: '124', AUD: '036', MXN: '484' };
+
+function currencyNumeric(code) {
+  if (typeof code !== 'string') return null;
+  return CURRENCIES[code.trim().toUpperCase()] || null;
+}
+
+// DE11: sequential STAN per backend process, 000001-999999, then wraps to 000001.
+let stanCounter = 0;
+function nextStan() {
+  stanCounter = (stanCounter % 999999) + 1;
+  return String(stanCounter).padStart(6, '0');
+}
+
+// DE12/DE13 and tags 9A/9F21 are the terminal's LOCAL date/time (the server's time zone).
+function localStamp(now) {
+  const p = (n) => String(n).padStart(2, '0');
+  const yy = p(now.getFullYear() % 100);
+  const mm = p(now.getMonth() + 1);
+  const dd = p(now.getDate());
+  const hhmmss = p(now.getHours()) + p(now.getMinutes()) + p(now.getSeconds());
+  return { hhmmss, mmdd: mm + dd, yymmdd: yy + mm + dd };
+}
+
+// DE37: retrieval reference number (an12) derived from a transaction id, like the lab SOAP service.
+function retrievalRef(transactionId) {
+  return String(transactionId || '').replace(/[^0-9a-zA-Z]/g, '').slice(0, 12).toUpperCase().padEnd(12, '0');
+}
+
+const fixedAn = (v, len) => String(v == null ? '' : v).slice(0, len).padEnd(len, ' ');
 
 // ------------------------
 // TLV Utilities
@@ -317,13 +357,19 @@ class EMVTransaction {
     cardNumber,
     amount,
     scheme = 'visa',
-    interfaceType = 'contact'   // <-- DEFAULT VALUE ONLY
+    interfaceType = 'contact',
+    options = {}
   ) {
     this.transactionId = transactionId;
     this.cardNumber = cardNumber;
     this.amount = amount;
     this.scheme = scheme.toLowerCase();
-    this.interfaceType = interfaceType.toLowerCase();  // <-- VALID
+    this.interfaceType = interfaceType.toLowerCase();
+    this.currency = currencyNumeric(options.currency || 'USD') || '840';
+    this.merchantId = options.merchantId || 'MERCHANT01';
+    this.terminalId = options.terminalId || 'TERM0001';
+    this.now = options.now || new Date();
+    this.authIdResponse = null;
     this.stan = this.generateSTAN();
     this.emvTags = new EMVTags();
     this.iso8583Message = new ISO8583Message();
@@ -331,33 +377,33 @@ class EMVTransaction {
   }
 
   generateSTAN() {
-    return Math.floor(Math.random() * 1000000).toString().padStart(6, '0');
+    return nextStan();
   }
 
   buildTransaction() {
-    // ISO 8583 core fields
+    const stamp = localStamp(this.now);
+
+    // ISO 8583 core fields (0100 authorization request)
     this.iso8583Message.setField('2', this.cardNumber);
+    this.iso8583Message.setField('3', '000000'); // purchase, default accounts
     this.iso8583Message.setField(
       '4',
       // DEF-001: round, don't floor. 19.99 * 100 = 1998.9999999999998 in binary floating point.
       Math.round(Number(this.amount) * 100).toString().padStart(12, '0')
     );
     this.iso8583Message.setField('11', this.stan);
-    this.iso8583Message.setField('39', '00'); // Approved
-    this.iso8583Message.setField(
-      '12',
-      new Date().toISOString().substring(11, 19).replace(/:/g, '')
-    );
-    this.iso8583Message.setField(
-      '13',
-      new Date().toISOString().substring(5, 10).replace('-', '')
-    );
-    this.iso8583Message.setField('49', '840'); // USD
+    this.iso8583Message.setField('12', stamp.hhmmss); // local time
+    this.iso8583Message.setField('13', stamp.mmdd);   // local date
+    // DE39 in the 0100 is kept for backward compatibility (DEF-002 tests); the real
+    // response code is in the 0110 (getResponseISO8583Data).
+    this.iso8583Message.setField('39', '00');
+    this.iso8583Message.setField('41', fixedAn(this.terminalId, 8));
+    this.iso8583Message.setField('42', fixedAn(this.merchantId, 15));
+    this.iso8583Message.setField('49', this.currency);
 
     // Scheme-flavored EMV values
-    const now = new Date();
-    const dateYYMMDD = now.toISOString().substring(2, 10).replace(/-/g, '');
-    const timeHHMMSS = now.toISOString().substring(11, 19).replace(/:/g, '');
+    const dateYYMMDD = stamp.yymmdd;
+    const timeHHMMSS = stamp.hhmmss;
 
     let aid;
     let appVersion;
@@ -374,6 +420,11 @@ class EMVTransaction {
         appVersion = '0001';
         usageControl = 'F800';
         break;
+      case 'discover':
+        aid = 'A0000001523010';      // Discover AID (sample)
+        appVersion = '0001';
+        usageControl = 'F800';
+        break;
       case 'visa':
       default:
         aid = 'A0000000031010';      // Visa AID (sample)
@@ -384,7 +435,7 @@ class EMVTransaction {
 
     // EMV tags
     this.emvTags.addTag('9F06', {
-      name: 'Application Dedicated File (AID)',
+      name: 'Application Identifier (AID) - terminal',
       category: 'Application',
       value: aid
     });
@@ -428,6 +479,11 @@ class EMVTransaction {
       category: 'Terminal',
       value: '0840'
     });
+    this.emvTags.addTag('5F2A', {
+      name: 'Transaction Currency Code',
+      category: 'Transaction',
+      value: '0' + this.currency
+    });
     this.emvTags.addTag('9C', {
       name: 'Transaction Type',
       category: 'Transaction',
@@ -449,11 +505,14 @@ class EMVTransaction {
     this.iso8583Message.setField('55', tlvHex);
   }
 
-  // DEF-002: write the authorization decision into the message: DE39 and EMV tag 8A
-  // (Authorisation Response Code, an2, so '51' is stored as ASCII hex 3531), then rebuild DE55.
-  // Interim fix: in a real flow DE39/8A belong in the 0110 response; the simulator only builds a 0100.
-  setAuthorizationResult(responseCode) {
+  // DEF-002: write the authorization decision: DE39 and EMV tag 8A (Authorisation Response Code,
+  // an2, so '51' is stored as ASCII hex 3531). The 0100 keeps them for backward compatibility;
+  // the 0110 from getResponseISO8583Data() is where they properly belong.
+  // authCode (approvals only) becomes DE38 in the 0110: its last 6 characters.
+  setAuthorizationResult(responseCode, authCode = null) {
     const code = String(responseCode == null ? '' : responseCode).padStart(2, '0').slice(0, 2);
+    this.responseCode = code;
+    this.authIdResponse = authCode ? String(authCode).slice(-6) : null;
     this.iso8583Message.setField('39', code);
     this.emvTags.addTag('8A', {
       name: 'Authorisation Response Code',
@@ -473,31 +532,24 @@ class EMVTransaction {
     };
   }
 
+  // The 0100 authorization request, as returned and stored.
   getISO8583Data() {
-    const fields = {};
-    const fieldDefs = this.iso8583Message.getFields();
+    return messageData(this.iso8583Message);
+  }
 
-    // DEF-003: never emit the full PAN. Everything returned here is also what gets stored.
-    const outFields = { ...this.iso8583Message.fields };
-    if (outFields['2']) outFields['2'] = maskPan(outFields['2']);
-
-    for (const [fieldNum, fieldDef] of Object.entries(fieldDefs)) {
-      const fieldNumInt = parseInt(fieldNum, 10);
-      if ([2, 4, 11, 12, 13, 39, 49, 55].includes(fieldNumInt)) {
-        fields[fieldNum] = {
-          name: fieldDef.name,
-          value: outFields[fieldNum] || '',
-          type: fieldDef.type
-        };
-      }
-    }
-
-    return {
-      mti: this.iso8583Message.mti,
-      bitmap: this.iso8583Message.getBitmap(),
-      fields: fields,
-      hex_message: this.iso8583Message.toHex(outFields)
-    };
+  // The 0110 authorization response: echoes DE2/3/4/11/12/13/41/42/49, adds DE38 (approvals)
+  // and DE39, and carries the issuer's tag 8A in DE55.
+  getResponseISO8583Data() {
+    const req = this.iso8583Message.fields;
+    const msg = new ISO8583Message();
+    msg.setMTI('0110');
+    for (const de of ['2', '3', '4', '11', '12', '13']) msg.setField(de, req[de]);
+    if (this.authIdResponse) msg.setField('38', this.authIdResponse);
+    msg.setField('39', this.responseCode || req['39']);
+    for (const de of ['41', '42', '49']) msg.setField(de, req[de]);
+    const tag8A = this.emvTags.getTag('8A');
+    if (tag8A && tag8A.value) msg.setField('55', buildTLV('8A', tag8A.value));
+    return messageData(msg);
   }
 
   getField55Pretty() {
@@ -520,6 +572,46 @@ class EMVTransaction {
   }
 }
 
+// Returned/stored form of a message. DEF-003: DE2 is truncated (first 6 / last 4) in the
+// fields and in hex_message; the full PAN never leaves the message object.
+function messageData(message) {
+  const fieldDefs = message.getFields();
+  const outFields = { ...message.fields };
+  if (outFields['2'] && /^\d+$/.test(outFields['2'])) outFields['2'] = maskPan(outFields['2']);
+
+  const fields = {};
+  for (const fieldNum of Object.keys(outFields).sort((a, b) => a - b)) {
+    const def = fieldDefs[fieldNum] || { name: 'Field ' + fieldNum, type: 'unknown' };
+    fields[fieldNum] = { name: def.name, value: outFields[fieldNum] || '', type: def.type };
+  }
+
+  return {
+    mti: message.mti,
+    bitmap: message.getBitmap(),
+    fields,
+    hex_message: message.toHex(outFields)
+  };
+}
+
+// Follow-up messages for a stored transaction: 0200 (refund, DE3 200000) and 0400 (reversal,
+// DE3 000000). originalFields is the stored 0100 field map ({ '2': { value }, ... }); its DE2
+// is already truncated, so the follow-up never sees a full PAN. DE37 links to the original.
+function buildFollowUpMessage({ mti, processingCode, amountMinor, originalTransactionId, originalFields, now = new Date() }) {
+  const value = (de) => (originalFields && originalFields[de] ? originalFields[de].value : undefined);
+  const stamp = localStamp(now);
+  const msg = new ISO8583Message();
+  msg.setMTI(mti);
+  if (value('2')) msg.setField('2', value('2'));
+  msg.setField('3', processingCode);
+  msg.setField('4', String(amountMinor).padStart(12, '0'));
+  msg.setField('11', nextStan());
+  msg.setField('12', stamp.hhmmss);
+  msg.setField('13', stamp.mmdd);
+  msg.setField('37', retrievalRef(originalTransactionId));
+  for (const de of ['41', '42', '49']) if (value(de)) msg.setField(de, value(de));
+  return messageData(msg);
+}
+
 module.exports = {
   EMVTags,
   ISO8583Message,
@@ -527,6 +619,12 @@ module.exports = {
   maskPan,
   isCardExpired,
   simNow,
+  currencyNumeric,
+  CURRENCIES,
+  nextStan,
+  localStamp,
+  retrievalRef,
+  buildFollowUpMessage,
   buildTLV,
   decodeTLV,
   prettyPrintTLV,

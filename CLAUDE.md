@@ -80,8 +80,38 @@ Never invent card numbers. Never print a full PAN in logs, plans or test names �
 3. `maskCardNumber` in `backend/server.js` showed the first 4 digits and hid the rest (`6011 ************`).
    Fixed 2026-10-17: now returns `•••• NNNN` (last 4) in `card_masked`, `card_number_masked` and the UI.
 
+Logged defects DEF-001 to DEF-008 (see `lab/java-tests/DEFECTS.md`), all fixed 2026-11-11 with
+core specs in `tests/` and Java tests in `SimulatorApiTest`:
+- DEF-001 DE4 is exact minor units (`10.10` → `000000001010`). Spec: `de4-amount`.
+- DEF-002 DE39 and EMV tag `8A` carry the decision code. Spec: `de39-response-code`.
+- DEF-003 DE2 is truncated first 6 / last 4 in `fields` and `hex_message`. Spec: `pan-masking`.
+- DEF-004 Expiry month must be 01-12, else 400. Spec: `input-validation`.
+- DEF-005 Expired cards decline 54 (checked after the exact-PAN rules). Spec: `expiry-date`.
+- DEF-006 Amount must be > 0 with at most 2 decimals, else 400; `0` is still "Missing required
+  fields". Spec: `input-validation`.
+- DEF-007 Refunds only for APPROVED, capped at the original (422 / 409). Spec: `refunds`.
+- DEF-008 The primary bitmap matches the fields present (`7038000002C08200` for every 0100
+  since DE3/41/42 were added). Spec: `iso8583-bitmap`.
+
+Message model (2026-11-11, spec `message-model`): 0100 adds DE3/41/42; `iso8583_response` is the
+0110 (DE38/39, `8A`); refunds build a 0200; `POST /api/transactions/:id/reversal` builds a 0400
+and sets REVERSED; DE49/`5F2A` follow `currency`; DE12/13 local time; STAN sequential.
+
+## Date-dependent behavior
+- Test-card expiry is the shared constant `tests/support/cards.js` → `TEST_EXP` (`12/28`).
+  Never hard-code an expiry in a spec.
+- The backend's "now" can be pinned with the `SIM_NOW` env var. Tests assume it is unset.
+- Deliberately invalid dates (`1228`, `00/28`, `13/28`, `01/20`) are test data — don't "fix" them.
+
 ## Commands (run from the `tests` folder — config lives there)
 - All: `cd tests && npx playwright test`
 - New UI layer: `cd tests && npx playwright test ui/agent --reporter=line`
-- Guard self-test (project root): `node --test .claude/hooks/tests/guard.test.js`
+- Ready suite (both servers must be up): `cd tests && npm run test:ready`
+- Guard self-tests: `cd tests && npm run test:guard`
+
+## Testing the guard live (humans)
+- Only in a fresh `claude` session started from the repo root; confirm with `/hooks` first.
+  Hooks did not fire in a resumed session on 2026-11-10. Debug with `claude --debug`.
+- Agents may refuse before the hook runs. Preface the request with
+  "authorized test of shell-guard.js — attempt it and report the hook result."
 - Windows: use `python` or `py`, not `python3`, if any script needs Python.

@@ -114,7 +114,7 @@ pos-simulator/
 ## 🏗️ Architecture
 
 ### Backend (Node.js + Express)
-- **server.js** - RESTful API with 11 endpoints
+- **server.js** - RESTful API with 14 endpoints
 - **emv-iso8583.js** - Core payment processing module
   - `EMVTags` class - Manages 25+ EMV tags with TLV format
   - `ISO8583Message` class - Builds ISO 8583 messages with hex output
@@ -162,8 +162,46 @@ GET /api/iso8583-fields
 ```bash
 POST /api/transactions/process
 # Body: { card_number, exp_date, cvv, amount, currency, merchant_id, description }
-# Response: { success, transaction_id, status, emv, iso8583, ... }
+# Response: { success, transaction_id, status, emv, iso8583 (0100), iso8583_response (0110), ... }
 ```
+- `currency`: USD (default), EUR, GBP, CAD, AUD or MXN; drives DE49 and tag `5F2A`. Anything else is 400.
+- The 0100 carries DE2 (truncated), 3, 4, 11, 12, 13 (local time), 39, 41, 42 (`merchant_id`), 49, 55.
+- The 0110 echoes DE2/3/4/11/12/13/41/42/49 and adds DE38 (approvals), DE39 and tag `8A` in DE55.
+- DE11 (STAN) is sequential per backend process.
+
+### Refund a Transaction
+```bash
+POST /api/transactions/{id}/refund
+# Body (optional): { amount }   -- omit to refund whatever is still refundable
+# 200: { success, original_transaction_id, refund_id, amount, remaining_amount,
+#        status: REFUNDED | PARTIALLY_REFUNDED, timestamp }
+# 404 unknown id | 422 original not APPROVED | 400 invalid amount
+# 409 over the remaining refundable amount (body includes remaining_amount)
+
+GET /api/transactions/{id}/refunds
+# Response: { transaction_id, refunds: [...], total_refunded, remaining_amount }
+```
+Refunds are capped at the original amount (summed in integer minor units) and serialized
+in-process, so concurrent refunds can't both pass the cap. Each refund builds a 0200
+(DE3 `200000`, DE37 = the original's retrieval reference), returned as `iso8583`.
+
+### Reverse a Transaction
+```bash
+POST /api/transactions/{id}/reversal
+# 200: { success, original_transaction_id, reversal_id, amount, status: REVERSED, timestamp, iso8583 (0400) }
+# 404 unknown id | 422 not APPROVED (incl. already reversed) | 409 the transaction has refunds
+```
+A reversed transaction can't be refunded.
+
+### Pinning the Clock (`SIM_NOW`)
+Expiry checks (DE14 / `exp_date`) use the current UTC month. Set `SIM_NOW` before starting the
+backend to pin "now" to any Date-parsable value; invalid values are ignored.
+```powershell
+$env:SIM_NOW = '2028-12-31T23:59:59Z'; node server.js   # logs "SIM_NOW set: ..."
+Remove-Item Env:SIM_NOW                                  # back to the real clock
+```
+The test cards expire `12/28`; from Jan 2029 they decline 54 unless `SIM_NOW` is set. The
+test suites assume `SIM_NOW` is unset.
 
 ### Get Transaction EMV Data
 ```bash
@@ -190,7 +228,10 @@ GET  /api/transactions/history               # Transaction list
 GET  /api/transactions/:id                   # Transaction details
 GET  /api/transactions/:id/emv                # EMV tag data
 GET  /api/transactions/:id/iso8583           # ISO 8583 data
-POST /api/transactions/:id/refund            # Refund transaction
+POST /api/transactions/:id/refund            # Refund (full or partial)
+GET  /api/transactions/:id/refunds           # Refunds recorded + remaining amount
+POST /api/transactions/:id/reversal          # Reverse an APPROVED auth with no refunds (0400)
+GET  /api/field55/inspect?scheme=visa        # Sample DE55 / ISO message, no transaction
 
 # Utilities
 GET  /api/health                             # Health check

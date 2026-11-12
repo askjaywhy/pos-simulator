@@ -3,7 +3,10 @@ const sqlite3 = require('sqlite3').verbose();
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const { EMVTags, ISO8583Message, EMVTransaction, isCardExpired, simNow } = require('./emv-iso8583');
+const {
+  EMVTags, ISO8583Message, EMVTransaction, isCardExpired, simNow,
+  currencyNumeric, CURRENCIES, buildFollowUpMessage
+} = require('./emv-iso8583');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -36,7 +39,8 @@ function initializeDatabase() {
           response_code TEXT,
           auth_code TEXT,
           emv_tags TEXT,
-          iso8583_message TEXT
+          iso8583_message TEXT,
+          iso8583_response TEXT
         )
       `, (err) => {
         if (err) reject(err);
@@ -49,7 +53,22 @@ function initializeDatabase() {
           transaction_id TEXT NOT NULL,
           amount REAL,
           amount_minor INTEGER NOT NULL,
-          timestamp TEXT
+          timestamp TEXT,
+          iso8583_message TEXT
+        )
+      `, (err) => {
+        if (err) reject(err);
+      });
+
+      // Reversals: one per transaction (0400). An APPROVED transaction with no refunds can be
+      // reversed; its status becomes REVERSED, so it can't then be refunded or reversed again.
+      db.run(`
+        CREATE TABLE IF NOT EXISTS reversals (
+          id TEXT PRIMARY KEY,
+          transaction_id TEXT NOT NULL UNIQUE,
+          amount_minor INTEGER NOT NULL,
+          timestamp TEXT,
+          iso8583_message TEXT
         )
       `, (err) => {
         if (err) reject(err);
@@ -218,6 +237,12 @@ app.post('/api/transactions/process', (req, res) => {
     return res.status(400).json({ error: 'Invalid amount: must be a positive number with at most 2 decimal places' });
   }
 
+  // DE49 comes from the request's currency (ISO 4217 alpha), 2-decimal currencies only
+  if (currencyNumeric(currency) === null) {
+    return res.status(400).json({ error: `Unsupported currency (supported: ${Object.keys(CURRENCIES).join(', ')})` });
+  }
+  const currencyCode = currency.trim().toUpperCase();
+
   const cleanCardNumber = card_number.replace(/\s/g, '');
   const cardBrand = getCardBrand(cleanCardNumber);
   const transactionId = uuidv4();
@@ -234,11 +259,13 @@ app.post('/api/transactions/process', (req, res) => {
 
       // Create EMV transaction
       const transaction = new EMVTransaction(
-  transactionId,
-  cleanCardNumber,
-  amount,
-  cardBrand.toLowerCase()
-);
+        transactionId,
+        cleanCardNumber,
+        amount,
+        cardBrand.toLowerCase(),
+        'contact',
+        { currency: currencyCode, merchantId: merchant_id, now: simNow() }
+      );
 
       let status, responseCode, declineReason, authCode;
 
@@ -260,33 +287,36 @@ app.post('/api/transactions/process', (req, res) => {
         authCode = 'AUTH' + transactionId.substring(0, 6).toUpperCase();
       }
 
-      // DEF-002: DE39 and tag 8A must reflect the decision, not a hard-coded 00
-      transaction.setAuthorizationResult(responseCode);
+      // DEF-002: DE39 and tag 8A must reflect the decision, not a hard-coded 00.
+      // The auth code becomes DE38 in the 0110 response.
+      transaction.setAuthorizationResult(responseCode, authCode);
 
       const emvData = transaction.getEMVData();
       const isoData = transaction.getISO8583Data();
+      const isoResponse = transaction.getResponseISO8583Data();
 
       // Store in database
       db.run(
         `INSERT INTO transactions (
           id, card_number_masked, card_brand, exp_date, amount,
           currency, merchant_id, description, status, response_code,
-          auth_code, emv_tags, iso8583_message
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          auth_code, emv_tags, iso8583_message, iso8583_response
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           transactionId,
           maskCardNumber(cleanCardNumber),
           cardBrand,
           exp_date,
           amount,
-          currency,
+          currencyCode,
           merchant_id,
           description,
           status,
           responseCode,
           authCode,
           JSON.stringify(emvData),
-          JSON.stringify(isoData)
+          JSON.stringify(isoData),
+          JSON.stringify(isoResponse)
         ],
         (err) => {
           if (err) {
@@ -301,7 +331,7 @@ app.post('/api/transactions/process', (req, res) => {
             decline_reason: declineReason,
             auth_code: authCode,
             amount: amount,
-            currency: currency,
+            currency: currencyCode,
             timestamp: timestamp,
             card_masked: maskCardNumber(cleanCardNumber),
             card_brand: cardBrand,
@@ -313,6 +343,11 @@ app.post('/api/transactions/process', (req, res) => {
               mti: isoData.mti,
               fields: isoData.fields,
               hex_message: isoData.hex_message
+            },
+            iso8583_response: {
+              mti: isoResponse.mti,
+              fields: isoResponse.fields,
+              hex_message: isoResponse.hex_message
             }
           });
         }
@@ -320,6 +355,16 @@ app.post('/api/transactions/process', (req, res) => {
     }
   );
 });
+
+// Stored JSON columns -> objects
+function parseRow(row) {
+  return {
+    ...row,
+    emv_tags: JSON.parse(row.emv_tags),
+    iso8583_message: JSON.parse(row.iso8583_message),
+    iso8583_response: row.iso8583_response ? JSON.parse(row.iso8583_response) : null
+  };
+}
 
 // Get transaction history (must be registered before /:id, or Express matches "history" as an id)
 app.get('/api/transactions/history', (req, res) => {
@@ -331,11 +376,7 @@ app.get('/api/transactions/history', (req, res) => {
       }
 
       res.json({
-        transactions: rows.map(row => ({
-          ...row,
-          emv_tags: JSON.parse(row.emv_tags),
-          iso8583_message: JSON.parse(row.iso8583_message)
-        }))
+        transactions: rows.map(parseRow)
       });
     }
   );
@@ -354,11 +395,7 @@ app.get('/api/transactions/:id', (req, res) => {
         return res.status(404).json({ error: 'Transaction not found' });
       }
 
-      res.json({
-        ...row,
-        emv_tags: JSON.parse(row.emv_tags),
-        iso8583_message: JSON.parse(row.iso8583_message)
-      });
+      res.json(parseRow(row));
     }
   );
 });
@@ -387,7 +424,7 @@ app.get('/api/transactions/:id/emv', (req, res) => {
 // Get transaction ISO 8583 data
 app.get('/api/transactions/:id/iso8583', (req, res) => {
   db.get(
-    'SELECT id, iso8583_message FROM transactions WHERE id = ?',
+    'SELECT id, iso8583_message, iso8583_response FROM transactions WHERE id = ?',
     [req.params.id],
     (err, row) => {
       if (err) {
@@ -399,7 +436,8 @@ app.get('/api/transactions/:id/iso8583', (req, res) => {
 
       res.json({
         transaction_id: row.id,
-        iso8583: JSON.parse(row.iso8583_message)
+        iso8583: JSON.parse(row.iso8583_message),
+        response: row.iso8583_response ? JSON.parse(row.iso8583_response) : null
       });
     }
   );
@@ -407,7 +445,8 @@ app.get('/api/transactions/:id/iso8583', (req, res) => {
 
 // Refunds (DEF-007): APPROVED transactions only, persisted, total capped at the original amount.
 // Body (optional): { "amount": 25.50 }. Omitted = refund whatever is still refundable.
-// Refunds are serialized in-process so two concurrent requests can't both pass the cap check.
+// Refunds and reversals are serialized in-process so two concurrent requests can't both pass
+// the cap/status checks. Each refund builds a 0200 (DE3 200000); a reversal builds a 0400.
 let refundLock = Promise.resolve();
 function withRefundLock(work) {
   const run = refundLock.then(() => new Promise((release) => work(release)));
@@ -445,8 +484,15 @@ app.post('/api/transactions/:id/refund', (req, res) => {
 
           const refundId = uuidv4();
           const timestamp = new Date().toISOString();
-          db.run('INSERT INTO refunds (id, transaction_id, amount, amount_minor, timestamp) VALUES (?, ?, ?, ?, ?)',
-            [refundId, row.id, requestedMinor / 100, requestedMinor, timestamp], (err3) => {
+          const iso = buildFollowUpMessage({
+            mti: '0200',
+            processingCode: '200000',
+            amountMinor: requestedMinor,
+            originalTransactionId: row.id,
+            originalFields: JSON.parse(row.iso8583_message).fields
+          });
+          db.run('INSERT INTO refunds (id, transaction_id, amount, amount_minor, timestamp, iso8583_message) VALUES (?, ?, ?, ?, ?, ?)',
+            [refundId, row.id, requestedMinor / 100, requestedMinor, timestamp, JSON.stringify(iso)], (err3) => {
               if (err3) return reply(500, { error: 'Failed to store refund' });
               const leftMinor = remainingMinor - requestedMinor;
               reply(200, {
@@ -456,7 +502,8 @@ app.post('/api/transactions/:id/refund', (req, res) => {
                 amount: requestedMinor / 100,
                 remaining_amount: leftMinor / 100,
                 status: leftMinor === 0 ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
-                timestamp
+                timestamp,
+                iso8583: iso
               });
             });
         });
@@ -469,13 +516,15 @@ app.get('/api/transactions/:id/refunds', (req, res) => {
   db.get('SELECT id, amount FROM transactions WHERE id = ?', [req.params.id], (err, row) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     if (!row) return res.status(404).json({ error: 'Transaction not found' });
-    db.all('SELECT id, amount, amount_minor, timestamp FROM refunds WHERE transaction_id = ? ORDER BY timestamp',
+    db.all('SELECT id, amount, amount_minor, timestamp, iso8583_message FROM refunds WHERE transaction_id = ? ORDER BY timestamp',
       [row.id], (err2, refunds) => {
         if (err2) return res.status(500).json({ error: 'Database error' });
         const refundedMinor = refunds.reduce((t, r) => t + r.amount_minor, 0);
         res.json({
           transaction_id: row.id,
-          refunds: refunds.map(({ id, amount, timestamp }) => ({ refund_id: id, amount, timestamp })),
+          refunds: refunds.map(({ id, amount, timestamp, iso8583_message }) => ({
+            refund_id: id, amount, timestamp, iso8583: iso8583_message ? JSON.parse(iso8583_message) : null
+          })),
           total_refunded: refundedMinor / 100,
           remaining_amount: (Math.round(Number(row.amount) * 100) - refundedMinor) / 100
         });
@@ -483,8 +532,57 @@ app.get('/api/transactions/:id/refunds', (req, res) => {
   });
 });
 
+// Reverse an APPROVED authorization (0400). Not allowed once any refund exists: use refunds then.
+app.post('/api/transactions/:id/reversal', (req, res) => {
+  withRefundLock((release) => {
+    const reply = (code, body) => { release(); res.status(code).json(body); };
+
+    db.get('SELECT * FROM transactions WHERE id = ?', [req.params.id], (err, row) => {
+      if (err) return reply(500, { error: 'Database error' });
+      if (!row) return reply(404, { error: 'Transaction not found' });
+      if (row.status !== 'APPROVED') {
+        return reply(422, { error: 'Only APPROVED transactions can be reversed', status: row.status });
+      }
+
+      db.get('SELECT COUNT(*) AS n FROM refunds WHERE transaction_id = ?', [row.id], (err2, c) => {
+        if (err2) return reply(500, { error: 'Database error' });
+        if (c.n > 0) return reply(409, { error: 'Transaction has refunds and cannot be reversed' });
+
+        const amountMinor = Math.round(Number(row.amount) * 100);
+        const reversalId = uuidv4();
+        const timestamp = new Date().toISOString();
+        const iso = buildFollowUpMessage({
+          mti: '0400',
+          processingCode: '000000',
+          amountMinor,
+          originalTransactionId: row.id,
+          originalFields: JSON.parse(row.iso8583_message).fields
+        });
+
+        db.run('INSERT INTO reversals (id, transaction_id, amount_minor, timestamp, iso8583_message) VALUES (?, ?, ?, ?, ?)',
+          [reversalId, row.id, amountMinor, timestamp, JSON.stringify(iso)], (err3) => {
+            if (err3) return reply(500, { error: 'Failed to store reversal' });
+            db.run("UPDATE transactions SET status = 'REVERSED' WHERE id = ?", [row.id], (err4) => {
+              if (err4) return reply(500, { error: 'Failed to update transaction' });
+              reply(200, {
+                success: true,
+                original_transaction_id: row.id,
+                reversal_id: reversalId,
+                amount: amountMinor / 100,
+                status: 'REVERSED',
+                timestamp,
+                iso8583: iso
+              });
+            });
+          });
+      });
+    });
+  });
+});
+
 // Reset database
 app.post('/api/admin/reset', (req, res) => {
+  db.run('DELETE FROM reversals');
   db.run('DELETE FROM refunds');
   db.run('DELETE FROM transactions', (err) => {
     if (err) {
@@ -512,7 +610,8 @@ initializeDatabase().then(() => {
   console.log('  GET  /api/transactions/history        - View transaction history');
   console.log('  GET  /api/transactions/:id            - Get transaction details');
   console.log('  POST /api/transactions/:id/refund     - Refund (APPROVED only; optional {amount}; capped)');
-  console.log('  GET  /api/transactions/:id/refunds    - List refunds for a transaction\n');
+  console.log('  GET  /api/transactions/:id/refunds    - List refunds for a transaction');
+  console.log('  POST /api/transactions/:id/reversal   - Reverse an APPROVED auth with no refunds (0400)\n');
   console.log('🧪 UTILITY ENDPOINTS:');
   console.log('  GET  /api/test-cards                  - Get test card numbers');
   console.log('  GET  /api/health                      - Health check');

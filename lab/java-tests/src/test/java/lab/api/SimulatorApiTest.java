@@ -240,9 +240,8 @@ class SimulatorApiTest {
         Response r = Api.pay(card, 10.00, MERCHANT);
         String hex = r.path("iso8583.hex_message");
 
-        // The 0100 carries DE2, 4, 11, 12, 13, 39, 49 and 55: bits 2, 4, 11, 12, 13, 39, 49, 55
-        // of a 64-bit primary bitmap (bit 1 = most significant).
-        org.junit.jupiter.api.Assertions.assertEquals("5038000002008200", hex.substring(4, 20));
+        // The 0100 carries DE2, 3, 4, 11, 12, 13, 39, 41, 42, 49 and 55 (bit 1 = most significant).
+        org.junit.jupiter.api.Assertions.assertEquals("7038000002C08200", hex.substring(4, 20));
 
         // Property check: decode the bitmap and compare it with the fields actually returned.
         long bitmap = Long.parseUnsignedLong(hex.substring(4, 20), 16);
@@ -417,5 +416,82 @@ class SimulatorApiTest {
     @DisplayName("refund of an unknown transaction returns 404")
     void refundUnknownTransaction() {
         refund("00000000-0000-0000-0000-000000000000", null).then().statusCode(404);
+    }
+
+    // ---- Message model: 0110 response, 0200 refund, 0400 reversal, DE49 from currency ----
+
+    @Test
+    @DisplayName("approval returns a 0110 that echoes DE11 and carries DE38, DE39 and tag 8A")
+    void authorizationResponse0110() {
+        Response r = Api.pay(Cards.VISA, 12.34, MERCHANT);
+        String stan = r.path("iso8583.fields.'11'.value");
+        String authCode = r.path("auth_code");
+        r.then().statusCode(200)
+                .body("iso8583.fields.'3'.value", equalTo("000000"))
+                .body("iso8583_response.mti", equalTo("0110"))
+                .body("iso8583_response.hex_message", startsWith("0110"))
+                .body("iso8583_response.fields.'11'.value", equalTo(stan))
+                .body("iso8583_response.fields.'38'.value", equalTo(authCode.substring(authCode.length() - 6)))
+                .body("iso8583_response.fields.'39'.value", equalTo("00"))
+                .body("iso8583_response.fields.'55'.value", equalTo("8A023030"))
+                .body("iso8583_response.fields.'2'.value", equalTo("411111******1111"));
+    }
+
+    @Test
+    @DisplayName("decline 0110 has DE39 51 and no DE38")
+    void declineResponse0110() {
+        Api.pay(Cards.VISA_INSUFFICIENT_FUNDS, 10.00, MERCHANT).then().statusCode(200)
+                .body("iso8583_response.fields.'39'.value", equalTo("51"))
+                .body("iso8583_response.fields", not(hasKey("38")));
+    }
+
+    @Test
+    @DisplayName("DE49 follows the request currency; unsupported currency is rejected with 400")
+    void currencyDrivesDe49() {
+        var body = Api.payment(Cards.VISA, 10.00, MERCHANT);
+        body.put("currency", "EUR");
+        given().spec(Api.pos()).body(body).when().post("/transactions/process")
+                .then().statusCode(200)
+                .body("currency", equalTo("EUR"))
+                .body("iso8583.fields.'49'.value", equalTo("978"))
+                .body("emv.tags.'5F2A'.value", equalTo("0978"));
+        body.put("currency", "XYZ");
+        given().spec(Api.pos()).body(body).when().post("/transactions/process")
+                .then().statusCode(400).body("error", startsWith("Unsupported currency"));
+    }
+
+    @Test
+    @DisplayName("refund builds a 0200 with DE3 200000 and the refunded amount in DE4")
+    void refundBuilds0200() {
+        String id = Api.pay(Cards.VISA, 40.00, MERCHANT).path("transaction_id");
+        refund(id, 15.25).then().statusCode(200)
+                .body("iso8583.mti", equalTo("0200"))
+                .body("iso8583.fields.'3'.value", equalTo("200000"))
+                .body("iso8583.fields.'4'.value", equalTo("000000001525"))
+                .body("iso8583.fields.'2'.value", equalTo("411111******1111"));
+    }
+
+    @Test
+    @DisplayName("reversal builds a 0400, marks the transaction REVERSED and blocks refunds")
+    void reversalBuilds0400() {
+        String id = Api.pay(Cards.VISA, 22.00, MERCHANT).path("transaction_id");
+        given().spec(Api.pos()).when().post("/transactions/{id}/reversal", id)
+                .then().statusCode(200)
+                .body("status", equalTo("REVERSED"))
+                .body("iso8583.mti", equalTo("0400"))
+                .body("iso8583.fields.'4'.value", equalTo("000000002200"));
+        given().spec(Api.pos()).when().get("/transactions/{id}", id)
+                .then().statusCode(200).body("status", equalTo("REVERSED"));
+        refund(id, null).then().statusCode(422);
+        given().spec(Api.pos()).when().post("/transactions/{id}/reversal", id).then().statusCode(422);
+    }
+
+    @Test
+    @DisplayName("a refunded transaction cannot be reversed (409)")
+    void refundedNotReversible() {
+        String id = Api.pay(Cards.VISA, 30.00, MERCHANT).path("transaction_id");
+        refund(id, 5.00).then().statusCode(200);
+        given().spec(Api.pos()).when().post("/transactions/{id}/reversal", id)
+                .then().statusCode(409);
     }
 }
