@@ -26,14 +26,6 @@ class KnownDefectsTest {
 
     private static final String MERCHANT = "JAVA-DEFECT-" + Api.RUN;
 
-    @Test
-    @DisplayName("DEF-007 declined transaction cannot be refunded")
-    void refundOfDeclinedRejected() {
-        String id = Api.pay(Cards.VISA_LOST, 30.00, MERCHANT).path("transaction_id");
-        int status = given().spec(Api.pos())
-                .when().post("/transactions/{id}/refund", id)
-                .then().extract().statusCode();
-        org.hamcrest.MatcherAssert.assertThat("refund of a DECLINED transaction should be rejected (409/422)",
-                status, anyOf(equalTo(409), equalTo(422)));
-    }
+    // All logged defects (DEF-001 to DEF-008) are fixed; their tests now live in SimulatorApiTest.
+    // Add a test here, tagged known-defect, for each newly found defect until it is fixed.
 }

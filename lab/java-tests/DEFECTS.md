@@ -15,7 +15,7 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 | DEF-004 | Invalid expiry month (13) accepted (**fixed**) | Medium | Input validation |
 | DEF-005 | Expired card approved (**fixed**) | High | Authorization rules |
 | DEF-006 | Negative amount approved (**fixed**) | High | Input validation |
-| DEF-007 | Declined transaction can be refunded | High | Refunds |
+| DEF-007 | Declined transaction can be refunded (**fixed**) | High | Refunds |
 | DEF-008 | ISO 8583 primary bitmap wrong for data elements 9 and up (**fixed**) | High | ISO 8583 |
 
 ---
@@ -76,6 +76,7 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 **Expected:** HTTP 409 or 422.
 **Actual:** HTTP 200, `status: REFUNDED`. The endpoint also never records the refund, so the same transaction can be refunded any number of times.
 **Fix:** allow refunds only for APPROVED transactions, persist refunds, and cap the total refunded at the original amount.
+**Status:** Fixed. Refunds go to a `refunds` table (amounts in minor units). `POST /transactions/{id}/refund` takes an optional `{ amount }` (omitted = the remaining amount) and returns 404 if the transaction is unknown, **422** if it isn't APPROVED, 400 for an invalid amount (same rule as DEF-006), and **409** with `remaining_amount` if the refund would exceed what's left. Success returns `REFUNDED` or `PARTIALLY_REFUNDED` plus `remaining_amount`. Refunds are serialized in-process so concurrent requests can't both pass the cap. New `GET /transactions/{id}/refunds` lists them. Regression tests: `SimulatorApiTest` (`declinedNotRefundable`, `secondRefundRejected`, `partialRefundsCapped`, `overRefundRejected`, `invalidRefundAmount`, `refundUnknownTransaction`) and `tests/refunds.spec.js` (including a concurrent double-refund check).
 
 ### DEF-008 ISO 8583 primary bitmap wrong for data elements 9 and up
 **Severity:** High. A host parsing the bitmap would look for the wrong data elements, so the message can't be decoded.

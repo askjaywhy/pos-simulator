@@ -353,4 +353,69 @@ class SimulatorApiTest {
         payWithExpiry(Cards.VISA_INSUFFICIENT_FUNDS, "01/20").then().statusCode(200)
                 .body("response_code", equalTo("51"));
     }
+
+    private static Response refund(String id, Object amount) {
+        var spec = given().spec(Api.pos());
+        if (amount != null) spec = spec.body(Map.of("amount", amount));
+        return spec.when().post("/transactions/{id}/refund", id);
+    }
+
+    @Test
+    @DisplayName("refund of a DECLINED transaction is rejected with 422 (DEF-007)")
+    void declinedNotRefundable() {
+        String id = Api.pay(Cards.VISA_LOST, 30.00, MERCHANT).path("transaction_id");
+        refund(id, null).then().statusCode(422)
+                .body("error", equalTo("Only APPROVED transactions can be refunded"));
+    }
+
+    @Test
+    @DisplayName("a fully refunded transaction cannot be refunded again (DEF-007)")
+    void secondRefundRejected() {
+        String id = Api.pay(Cards.AMEX, 40.00, MERCHANT).path("transaction_id");
+        refund(id, null).then().statusCode(200).body("status", equalTo("REFUNDED"));
+        double remaining = refund(id, null).then().statusCode(409)
+                .body("error", equalTo("Refund exceeds remaining refundable amount"))
+                .extract().jsonPath().getDouble("remaining_amount");
+        org.junit.jupiter.api.Assertions.assertEquals(0.0, remaining, 1e-9);
+    }
+
+    @Test
+    @DisplayName("partial refunds are recorded and capped at the original amount (DEF-007)")
+    void partialRefundsCapped() {
+        String id = Api.pay(Cards.VISA, 75.50, MERCHANT).path("transaction_id");
+
+        var first = refund(id, 25.50).then().statusCode(200)
+                .body("status", equalTo("PARTIALLY_REFUNDED")).extract().jsonPath();
+        org.junit.jupiter.api.Assertions.assertEquals(50.0, first.getDouble("remaining_amount"), 1e-9);
+
+        var second = refund(id, 50.00).then().statusCode(200)
+                .body("status", equalTo("REFUNDED")).extract().jsonPath();
+        org.junit.jupiter.api.Assertions.assertEquals(0.0, second.getDouble("remaining_amount"), 1e-9);
+
+        refund(id, 0.01).then().statusCode(409);
+
+        var list = given().spec(Api.pos()).when().get("/transactions/{id}/refunds", id)
+                .then().statusCode(200).body("refunds", hasSize(2)).extract().jsonPath();
+        org.junit.jupiter.api.Assertions.assertEquals(75.5, list.getDouble("total_refunded"), 1e-9);
+    }
+
+    @Test
+    @DisplayName("refund larger than the original is rejected with 409 (DEF-007)")
+    void overRefundRejected() {
+        String id = Api.pay(Cards.VISA, 20.00, MERCHANT).path("transaction_id");
+        refund(id, 20.01).then().statusCode(409);
+    }
+
+    @Test
+    @DisplayName("invalid refund amount is rejected with 400 (DEF-007)")
+    void invalidRefundAmount() {
+        String id = Api.pay(Cards.VISA, 20.00, MERCHANT).path("transaction_id");
+        refund(id, -1).then().statusCode(400).body("error", startsWith("Invalid amount"));
+    }
+
+    @Test
+    @DisplayName("refund of an unknown transaction returns 404")
+    void refundUnknownTransaction() {
+        refund("00000000-0000-0000-0000-000000000000", null).then().statusCode(404);
+    }
 }

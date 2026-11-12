@@ -24,7 +24,7 @@ API testing uncovered **8 defects in the simulator**, each with steps, expected 
 | DEF-004 | Invalid expiry month accepted (**fixed**: month must be 01–12) | Medium |
 | DEF-005 | Expired card approved (**fixed**: declined 54; set `SIM_NOW` to pin the date) | High |
 | DEF-006 | Negative amount approved (**fixed**: amount must be positive, at most 2 decimals) | High |
-| DEF-007 | Declined transaction can be refunded | High |
+| DEF-007 | Declined transaction can be refunded (**fixed**: APPROVED only, recorded, capped at the original) | High |
 | DEF-008 | ISO 8583 primary bitmap wrong for data elements 9 and up (**fixed**) | High |
 
 ### Run it

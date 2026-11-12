@@ -42,6 +42,19 @@ function initializeDatabase() {
         if (err) reject(err);
       });
 
+      // Create refunds table (DEF-007): one row per refund, amounts in minor units for exact sums
+      db.run(`
+        CREATE TABLE IF NOT EXISTS refunds (
+          id TEXT PRIMARY KEY,
+          transaction_id TEXT NOT NULL,
+          amount REAL,
+          amount_minor INTEGER NOT NULL,
+          timestamp TEXT
+        )
+      `, (err) => {
+        if (err) reject(err);
+      });
+
       // Create decline rules table
       db.run(`
         CREATE TABLE IF NOT EXISTS decline_rules (
@@ -114,6 +127,16 @@ function getCardBrand(cardNumber) {
 }
 
 // Mask card number
+// DEF-006: a positive decimal with at most 2 places that fits DE4 (n12, minor units).
+// Checked on the decimal text, so 0.001, 19.999, -5, "abc" and 1e21 are all rejected.
+// Returns the amount in minor units (cents), or null if invalid. Used by payments and refunds.
+function parseAmountMinor(amount) {
+  const text = typeof amount === 'number' || typeof amount === 'string' ? String(amount).trim() : '';
+  if (!/^\d+(\.\d{1,2})?$/.test(text)) return null;
+  const minor = Math.round(Number(text) * 100);
+  return minor > 0 && minor <= 999999999999 ? minor : null;
+}
+
 function maskCardNumber(cardNumber) {
   return '•••• ' + cardNumber.slice(-4);
 }
@@ -190,12 +213,8 @@ app.post('/api/transactions/process', (req, res) => {
     return res.status(400).json({ error: 'Invalid expiration month (01-12)' });
   }
 
-  // DEF-006: amount must be a positive decimal with at most 2 places that fits DE4 (n12, minor units).
-  // Checked on the decimal text, so 0.001, 19.999, -5, "abc" and 1e21 are all rejected.
-  const amountText = typeof amount === 'number' || typeof amount === 'string' ? String(amount).trim() : '';
-  const amountValue = Number(amountText);
-  if (!/^\d+(\.\d{1,2})?$/.test(amountText) || !(amountValue > 0)
-      || Math.round(amountValue * 100) > 999999999999) {
+  // DEF-006: amount must be a positive decimal with at most 2 places that fits DE4 (see parseAmountMinor)
+  if (parseAmountMinor(amount) === null) {
     return res.status(400).json({ error: 'Invalid amount: must be a positive number with at most 2 decimal places' });
   }
 
@@ -386,35 +405,87 @@ app.get('/api/transactions/:id/iso8583', (req, res) => {
   );
 });
 
-// Refund transaction
+// Refunds (DEF-007): APPROVED transactions only, persisted, total capped at the original amount.
+// Body (optional): { "amount": 25.50 }. Omitted = refund whatever is still refundable.
+// Refunds are serialized in-process so two concurrent requests can't both pass the cap check.
+let refundLock = Promise.resolve();
+function withRefundLock(work) {
+  const run = refundLock.then(() => new Promise((release) => work(release)));
+  refundLock = run.catch(() => {});
+  return run;
+}
+
 app.post('/api/transactions/:id/refund', (req, res) => {
-  db.get(
-    'SELECT * FROM transactions WHERE id = ?',
-    [req.params.id],
-    (err, row) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      if (!row) {
-        return res.status(404).json({ error: 'Transaction not found' });
+  withRefundLock((release) => {
+    const reply = (code, body) => { release(); res.status(code).json(body); };
+
+    db.get('SELECT * FROM transactions WHERE id = ?', [req.params.id], (err, row) => {
+      if (err) return reply(500, { error: 'Database error' });
+      if (!row) return reply(404, { error: 'Transaction not found' });
+      if (row.status !== 'APPROVED') {
+        return reply(422, { error: 'Only APPROVED transactions can be refunded', status: row.status });
       }
 
-      const refundId = uuidv4();
+      db.get('SELECT COALESCE(SUM(amount_minor), 0) AS refunded FROM refunds WHERE transaction_id = ?',
+        [row.id], (err2, sum) => {
+          if (err2) return reply(500, { error: 'Database error' });
 
-      res.json({
-        success: true,
-        original_transaction_id: req.params.id,
-        refund_id: refundId,
-        amount: row.amount,
-        status: 'REFUNDED',
-        timestamp: new Date().toISOString()
+          const originalMinor = Math.round(Number(row.amount) * 100);
+          const remainingMinor = originalMinor - sum.refunded;
+          const body = req.body || {};
+          const hasAmount = body.amount !== undefined && body.amount !== null && body.amount !== '';
+          const requestedMinor = hasAmount ? parseAmountMinor(body.amount) : remainingMinor;
+
+          if (hasAmount && requestedMinor === null) {
+            return reply(400, { error: 'Invalid amount: must be a positive number with at most 2 decimal places' });
+          }
+          if (requestedMinor <= 0 || requestedMinor > remainingMinor) {
+            return reply(409, { error: 'Refund exceeds remaining refundable amount', remaining_amount: remainingMinor / 100 });
+          }
+
+          const refundId = uuidv4();
+          const timestamp = new Date().toISOString();
+          db.run('INSERT INTO refunds (id, transaction_id, amount, amount_minor, timestamp) VALUES (?, ?, ?, ?, ?)',
+            [refundId, row.id, requestedMinor / 100, requestedMinor, timestamp], (err3) => {
+              if (err3) return reply(500, { error: 'Failed to store refund' });
+              const leftMinor = remainingMinor - requestedMinor;
+              reply(200, {
+                success: true,
+                original_transaction_id: row.id,
+                refund_id: refundId,
+                amount: requestedMinor / 100,
+                remaining_amount: leftMinor / 100,
+                status: leftMinor === 0 ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
+                timestamp
+              });
+            });
+        });
+    });
+  });
+});
+
+// List a transaction's refunds (DEF-007)
+app.get('/api/transactions/:id/refunds', (req, res) => {
+  db.get('SELECT id, amount FROM transactions WHERE id = ?', [req.params.id], (err, row) => {
+    if (err) return res.status(500).json({ error: 'Database error' });
+    if (!row) return res.status(404).json({ error: 'Transaction not found' });
+    db.all('SELECT id, amount, amount_minor, timestamp FROM refunds WHERE transaction_id = ? ORDER BY timestamp',
+      [row.id], (err2, refunds) => {
+        if (err2) return res.status(500).json({ error: 'Database error' });
+        const refundedMinor = refunds.reduce((t, r) => t + r.amount_minor, 0);
+        res.json({
+          transaction_id: row.id,
+          refunds: refunds.map(({ id, amount, timestamp }) => ({ refund_id: id, amount, timestamp })),
+          total_refunded: refundedMinor / 100,
+          remaining_amount: (Math.round(Number(row.amount) * 100) - refundedMinor) / 100
+        });
       });
-    }
-  );
+  });
 });
 
 // Reset database
 app.post('/api/admin/reset', (req, res) => {
+  db.run('DELETE FROM refunds');
   db.run('DELETE FROM transactions', (err) => {
     if (err) {
       return res.status(500).json({ error: 'Failed to reset database' });
@@ -440,7 +511,8 @@ initializeDatabase().then(() => {
   console.log('  POST /api/transactions/process        - Process a payment');
   console.log('  GET  /api/transactions/history        - View transaction history');
   console.log('  GET  /api/transactions/:id            - Get transaction details');
-  console.log('  POST /api/transactions/:id/refund     - Refund a transaction\n');
+  console.log('  POST /api/transactions/:id/refund     - Refund (APPROVED only; optional {amount}; capped)');
+  console.log('  GET  /api/transactions/:id/refunds    - List refunds for a transaction\n');
   console.log('🧪 UTILITY ENDPOINTS:');
   console.log('  GET  /api/test-cards                  - Get test card numbers');
   console.log('  GET  /api/health                      - Health check');
