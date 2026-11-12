@@ -256,7 +256,8 @@ test.describe('Edge Cases', () => {
         card_number: '4111111111111111',
         exp_date: TEST_EXP,
         cvv: '123',
-        amount: Math.random() * 100
+        // 2-decimal amount: the API rejects more decimals since DEF-006
+        amount: Math.floor(Math.random() * 9999 + 1) / 100
       });
 
       const isoFields = data.iso8583.fields;

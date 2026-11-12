@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Map;
 
@@ -256,5 +257,54 @@ class SimulatorApiTest {
             if (v != null && !String.valueOf(v).isEmpty()) present.add(Integer.parseInt(num));
         });
         org.junit.jupiter.api.Assertions.assertEquals(present, fromBitmap);
+    }
+
+    @ParameterizedTest(name = "amount {0} is rejected with 400 (DEF-006)")
+    @ValueSource(doubles = {-5.00, -0.01, 0.001, 19.999, 1e13})
+    void invalidAmountRejected(double amount) {
+        given().spec(Api.pos()).body(Api.payment(Cards.VISA, amount, MERCHANT))
+                .when().post("/transactions/process")
+                .then().statusCode(400)
+                .body("error", startsWith("Invalid amount"));
+    }
+
+    @Test
+    @DisplayName("non-numeric amount is rejected with 400 (DEF-006)")
+    void nonNumericAmountRejected() {
+        given().spec(Api.pos()).body(Api.payment(Cards.VISA, "abc", MERCHANT))
+                .when().post("/transactions/process")
+                .then().statusCode(400)
+                .body("error", startsWith("Invalid amount"));
+    }
+
+    @ParameterizedTest(name = "boundary amount {0} is accepted (DEF-006)")
+    @CsvSource({"0.01, 000000000001", "9999999999.99, 999999999999"})
+    void boundaryAmountAccepted(double amount, String de4) {
+        given().spec(Api.pos()).body(Api.payment(Cards.VISA, amount, MERCHANT))
+                .when().post("/transactions/process")
+                .then().statusCode(200)
+                .body("iso8583.fields.'4'.value", equalTo(de4));
+    }
+
+    @ParameterizedTest(name = "expiry {0} is rejected with 400 (DEF-004)")
+    @ValueSource(strings = {"00/28", "13/28", "99/28"})
+    void invalidExpiryMonthRejected(String exp) {
+        Map<String, Object> body = Api.payment(Cards.VISA, 10.00, MERCHANT);
+        body.put("exp_date", exp);
+        given().spec(Api.pos()).body(body)
+                .when().post("/transactions/process")
+                .then().statusCode(400)
+                .body("error", equalTo("Invalid expiration month (01-12)"));
+    }
+
+    @ParameterizedTest(name = "expiry {0} is accepted (DEF-004)")
+    @ValueSource(strings = {"01/28", "12/28"})
+    void validExpiryMonthAccepted(String exp) {
+        Map<String, Object> body = Api.payment(Cards.VISA, 10.00, MERCHANT);
+        body.put("exp_date", exp);
+        given().spec(Api.pos()).body(body)
+                .when().post("/transactions/process")
+                .then().statusCode(200)
+                .body("status", equalTo("APPROVED"));
     }
 }

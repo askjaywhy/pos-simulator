@@ -27,16 +27,6 @@ class KnownDefectsTest {
     private static final String MERCHANT = "JAVA-DEFECT-" + Api.RUN;
 
     @Test
-    @DisplayName("DEF-004 invalid expiry month (13) is rejected")
-    void invalidExpiryMonth() {
-        Map<String, Object> body = Api.payment(Cards.VISA, 10.00, MERCHANT);
-        body.put("exp_date", "13/30");
-        given().spec(Api.pos()).body(body)
-                .when().post("/transactions/process")
-                .then().statusCode(400);
-    }
-
-    @Test
     @DisplayName("DEF-005 expired card is declined with 54")
     void expiredCardDeclined() {
         Map<String, Object> body = Api.payment(Cards.VISA, 10.00, MERCHANT);
@@ -46,14 +36,6 @@ class KnownDefectsTest {
                 .then().statusCode(200)
                 .body("status", equalTo("DECLINED"))
                 .body("response_code", equalTo("54"));
-    }
-
-    @Test
-    @DisplayName("DEF-006 negative amount is rejected")
-    void negativeAmountRejected() {
-        given().spec(Api.pos()).body(Api.payment(Cards.VISA, -5.00, MERCHANT))
-                .when().post("/transactions/process")
-                .then().statusCode(400);
     }
 
     @Test

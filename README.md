@@ -21,7 +21,10 @@ API testing uncovered **8 defects in the simulator**, each with steps, expected 
 | DEF-001 | ISO 8583 DE4 loses a cent on amounts like $19.99 (**fixed**: rounds instead of floors) | High |
 | DEF-002 | DE39 is always `00`, even on declined transactions (**fixed**: DE39 and tag 8A carry the decision) | High |
 | DEF-003 | Full PAN returned by the API and stored unmasked (**fixed**: DE2 truncated to first 6 / last 4) | Critical (PCI DSS) |
-| DEF-004–007 | Invalid expiry month accepted, expired card approved, negative amount approved, declined transaction refundable | Medium–High |
+| DEF-004 | Invalid expiry month accepted (**fixed**: month must be 01–12) | Medium |
+| DEF-005 | Expired card approved | High |
+| DEF-006 | Negative amount approved (**fixed**: amount must be positive, at most 2 decimals) | High |
+| DEF-007 | Declined transaction can be refunded | High |
 | DEF-008 | ISO 8583 primary bitmap wrong for data elements 9 and up (**fixed**) | High |
 
 ### Run it

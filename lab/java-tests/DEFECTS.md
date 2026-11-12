@@ -12,9 +12,9 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 | DEF-001 | ISO 8583 DE4 amount loses a cent for some values (**fixed**) | High | Financial accuracy |
 | DEF-002 | DE39 is always `00`, even on declined transactions (**fixed**) | High | ISO 8583 / reconciliation |
 | DEF-003 | Full PAN returned by the API and stored unmasked (**fixed**) | Critical | PCI DSS |
-| DEF-004 | Invalid expiry month (13) accepted | Medium | Input validation |
+| DEF-004 | Invalid expiry month (13) accepted (**fixed**) | Medium | Input validation |
 | DEF-005 | Expired card approved | High | Authorization rules |
-| DEF-006 | Negative amount approved | High | Input validation |
+| DEF-006 | Negative amount approved (**fixed**) | High | Input validation |
 | DEF-007 | Declined transaction can be refunded | High | Refunds |
 | DEF-008 | ISO 8583 primary bitmap wrong for data elements 9 and up (**fixed**) | High | ISO 8583 |
 
@@ -52,6 +52,7 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 **Expected:** HTTP 400, invalid expiration date.
 **Actual:** HTTP 200, approved. Validation only checks the `NN/NN` format.
 **Fix:** validate month 01–12.
+**Status:** Fixed. After the `NN/NN` format check, a month outside 01–12 returns HTTP 400 `Invalid expiration month (01-12)`. Regression tests: `SimulatorApiTest.invalidExpiryMonthRejected` (00, 13, 99), `validExpiryMonthAccepted` (01, 12) and `tests/input-validation.spec.js`.
 
 ### DEF-005 Expired card approved
 **Severity:** High
@@ -66,6 +67,7 @@ docker compose run --rm java-tests mvn -B -ntp test -Dgroups=known-defect -Dexcl
 **Expected:** HTTP 400.
 **Actual:** HTTP 200, approved. The check is `if (!amount)`, which only catches 0 or missing.
 **Fix:** require a positive number with at most 2 decimal places.
+**Status:** Fixed. The amount must match `^\d+(\.\d{1,2})?$` as text, be greater than 0, and fit DE4 (at most 999,999,999,999 minor units); otherwise HTTP 400 `Invalid amount: ...`. A missing or `0` amount still returns `Missing required fields`. This also closes DEF-001's 3-decimal edge case (`1.005` is now rejected). Regression tests: `SimulatorApiTest.invalidAmountRejected` (-5, -0.01, 0.001, 19.999, 1e13), `nonNumericAmountRejected`, `boundaryAmountAccepted` (0.01, 9999999999.99) and `tests/input-validation.spec.js`.
 
 ### DEF-007 Declined transaction can be refunded
 **Severity:** High. You can't refund money that was never captured.

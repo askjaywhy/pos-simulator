@@ -184,6 +184,21 @@ app.post('/api/transactions/process', (req, res) => {
     return res.status(400).json({ error: 'Invalid expiration date format (MM/YY)' });
   }
 
+  // DEF-004: the month must be 01-12
+  const expMonth = parseInt(exp_date.slice(0, 2), 10);
+  if (expMonth < 1 || expMonth > 12) {
+    return res.status(400).json({ error: 'Invalid expiration month (01-12)' });
+  }
+
+  // DEF-006: amount must be a positive decimal with at most 2 places that fits DE4 (n12, minor units).
+  // Checked on the decimal text, so 0.001, 19.999, -5, "abc" and 1e21 are all rejected.
+  const amountText = typeof amount === 'number' || typeof amount === 'string' ? String(amount).trim() : '';
+  const amountValue = Number(amountText);
+  if (!/^\d+(\.\d{1,2})?$/.test(amountText) || !(amountValue > 0)
+      || Math.round(amountValue * 100) > 999999999999) {
+    return res.status(400).json({ error: 'Invalid amount: must be a positive number with at most 2 decimal places' });
+  }
+
   const cleanCardNumber = card_number.replace(/\s/g, '');
   const cardBrand = getCardBrand(cleanCardNumber);
   const transactionId = uuidv4();
