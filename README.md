@@ -39,12 +39,15 @@ Full guide: [`lab/README.md`](lab/README.md) · Java suite: [`lab/java-tests/REA
 
 ## 📋 Quick Features
 
-- ✅ **EMV TLV** - 27-tag dictionary; 18 tags plus 8A emitted in DE55, including everything commonly required for an online auth (82, 9F02, 9F03, 9F27, 9F36); TVR/TSI match the APDU trace at 1st GENERATE AC (simulated values, no real cryptogram)
+- ✅ **EMV TLV** - 28-tag dictionary; 18 tags plus 8A emitted in DE55, including everything commonly required for an online auth (82, 9F02, 9F03, 9F27, 9F36); TVR/TSI match the APDU trace at 1st GENERATE AC (simulated values, no real cryptogram)
 - ✅ **ISO 8583** - 0100 request and 0110 response, 0200 refund and 0400 reversal messages, plus a 24-field reference dictionary
 - ✅ **Test Cards** - 4 approval brands and 4 decline codes (05, 41, 51, 54)
 - ✅ **RESTful API** - Transaction processing, history, refunds, EMV and ISO 8583 inspection
 - ✅ **APDU trace + decoder** - Every transaction gets a contact EMV kernel trace (C-APDU / R-APDU, status words, TVR/TSI/CVM/CID explained, logcat-style log); `tools/emv-decode.js` decodes TVR, TSI, CVM, CID, SW, TLV, DE55 and raw APDU logs
-- ✅ **Fault injection** - Opt-in `fault` on `/process`: app not found (6A82), PIN try limit (6983), malformed DE55, host timeout with timeout reversal, issuer 91/96, issuer authentication failure (6300), card removed before 2nd GENERATE AC
+- ✅ **Fault injection** - Opt-in `fault` on `/process`: app not found (6A82), PIN try limit (6983), malformed DE55, host timeout with timeout reversal, issuer 91/96, issuer authentication failure (6300), card removed before 2nd GENERATE AC. Each maps to an SDK-style error code (`ERR_*`)
+- ✅ **Entry modes** - Opt-in `entry_mode` (chip, contactless, swipe, fallback) sets DE22 / 9F39 and picks the trace: contact, contactless (C-2/C-3 style: PPSE, TTQ, ARQC in GPO, CVM limit) or magnetic stripe
+- ✅ **Terminal profile** - `GET/PUT/DELETE /api/terminal/config` (TID, MID, country, AIDs, CAPKs, floor and contactless limits) for TMS-style support scenarios
+- ✅ **Device log** - Any transaction as an Android logcat (threadtime) log, ready for `tools/emv-decode.js log`
 - ✅ **Interactive UI** - Terminal simulator with EMV and ISO 8583 tabs
 - ✅ **Automated Tests** - Playwright API specs plus a page-object UI suite with a visual baseline
 - ✅ **Agentic test kit** - Claude Code planner, generator and locator-only healer, held in check by hook guards (see below)
@@ -241,6 +244,43 @@ node tools/emv-decode.js log customer-logcat.txt        # finds non-9000 SWs, mi
 node tools/emv-decode.js trace <transaction_id> --save trace.log
 ```
 
+### Entry Modes (opt-in)
+```bash
+POST /api/transactions/process  { ..., "entry_mode": "contactless" }   # chip | contactless | swipe | fallback
+```
+| `entry_mode` | DE22 | DE55 | Trace |
+|---|---|---|---|
+| (none) | not sent | as before | contact |
+| `chip` | `051` | + `9F39` `05` | contact |
+| `contactless` | `071` | + `9F39` `07`, `9F66` TTQ `36004000`; TSI `0000` | contactless: PPSE, GPO (ARQC in the response), READ RECORD, fDDA, CVM limit, online; no 2nd GENERATE AC |
+| `fallback` | `801` | none (`emv` null, DE55 removed from 0100/0110) | 3 failed ICC power-ons, then swipe |
+| `swipe` | — | — | chip card swiped → `TERMINATED`, `ERR_CHIP_CARD_SWIPED` |
+
+Responses to requests with `entry_mode` echo it, and add `apdu_trace` / `device_log` links.
+Contactless kernel by scheme: Visa C-3, Mastercard C-2, Amex C-4, Discover C-6. Above the
+contactless CVM limit (default 100.00) the trace records online PIN (TVR byte 3 bit 3, CVMR `420300`).
+
+### Terminal Profile
+```bash
+GET    /api/terminal/config        # { config, defaults, terminal_errors }
+PUT    /api/terminal/config        # partial update, validated all-or-nothing (400 + details)
+DELETE /api/terminal/config        # restore defaults (POST /api/admin/reset does too)
+```
+Defaults equal the old constants (`TERM0001`, `MERCHANT01`, `0840`, the 4 AIDs, CAPK `09`, floor 0).
+Support scenarios: remove an AID → `TERMINATED` `ERR_AID_NOT_SUPPORTED`; remove CAPK `09` → DDA/fDDA
+failed in TVR (still approved); `contactless_transaction_limit_minor` → `ERR_CTLS_LIMIT_EXCEEDED`;
+`contactless_cvm_limit_minor` → online PIN; `floor_limit_minor` above the amount → TVR byte 4 clear.
+The profile is global server state: tests that change it restore it in `afterEach`.
+
+### Device Log
+```bash
+GET /api/transactions/{id}/device-log              # text/plain, logcat threadtime
+GET /api/transactions/{id}/device-log?format=json  # { transaction_id, lines }
+```
+Tags: `SystemInfo`, `TermConfig`, `CardReader`, `EmvKernel`, `PinPad`, `Comm`; applied faults end
+with `E EmvKernel: SDK error ERR_*`. APDU lines keep `C-APDU` / `R-APDU`, so
+`node tools/emv-decode.js log device.log` decodes it.
+
 ### Pinning the Clock (`SIM_NOW`)
 Expiry checks (DE14 / `exp_date`) use the current UTC month. Set `SIM_NOW` before starting the
 backend to pin "now" to any Date-parsable value; invalid values are ignored.
@@ -280,11 +320,13 @@ POST /api/transactions/:id/refund            # Refund (full or partial)
 GET  /api/transactions/:id/refunds           # Refunds recorded + remaining amount
 POST /api/transactions/:id/reversal          # Reverse an APPROVED auth with no refunds (0400)
 GET  /api/transactions/:id/apdu-trace        # Card/terminal APDU trace, TVR/TSI/CVM/CID explained
+GET  /api/transactions/:id/device-log        # Trace as a logcat (threadtime) device log
 GET  /api/field55/inspect?scheme=visa        # Sample DE55 / ISO message, no transaction
 
 # Support tools
 GET  /api/faults                             # Fault catalogue (opt-in "fault" on /process)
 POST /api/tools/emv-decode                   # Decode TVR/TSI/CVM/CID/SW/TLV/DE55/APDU log
+GET  /api/terminal/config                    # Terminal profile; PUT updates, DELETE restores defaults
 
 # Utilities
 GET  /api/health                             # Health check

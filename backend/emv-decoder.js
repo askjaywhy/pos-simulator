@@ -28,7 +28,8 @@ const TAG_NAMES = {
   '9F1A': 'Terminal Country Code', '9F1E': 'IFD Serial Number', '9F21': 'Transaction Time',
   '9F26': 'Application Cryptogram', '9F27': 'Cryptogram Information Data (CID)', '9F33': 'Terminal Capabilities',
   '9F34': 'CVM Results', '9F35': 'Terminal Type', '9F36': 'Application Transaction Counter (ATC)',
-  '9F37': 'Unpredictable Number', '9F38': 'PDOL', '9F4B': 'Signed Dynamic Application Data', '9F66': 'Terminal Transaction Qualifiers (TTQ)',
+  '9F37': 'Unpredictable Number', '9F38': 'PDOL', '9F39': 'POS Entry Mode', '9F2A': 'Kernel Identifier',
+  '9F6C': 'Card Transaction Qualifiers (CTQ)', 'BF0C': 'FCI Issuer Discretionary Data', '9F4B': 'Signed Dynamic Application Data', '9F66': 'Terminal Transaction Qualifiers (TTQ)',
   'A5': 'FCI Proprietary Template'
 };
 

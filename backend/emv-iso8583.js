@@ -23,6 +23,7 @@ const EMV_TAGS = {
   '9F35': { name: 'Terminal Type', category: 'Terminal' },
   '9F1E': { name: 'IFD Serial Number', category: 'Terminal' },
   '9F39': { name: 'POS Entry Mode', category: 'Terminal' },
+  '9F66': { name: 'Terminal Transaction Qualifiers (TTQ)', category: 'Terminal' },
   '9F33': { name: 'Terminal Capabilities', category: 'Terminal' },
   '9F1D': { name: 'Terminal Risk Management Data', category: 'Terminal' },
   '5F20': { name: 'Cardholder Name', category: 'Card' },
@@ -40,6 +41,7 @@ const ISO8583_FIELDS = {
   '11':  { name: 'System Trace Audit Number (STAN)', type: 'numeric', length: 6, category: 'Transaction' },
   '12':  { name: 'Time, Transaction (hhmmss)', type: 'numeric', length: 6, category: 'Transaction' },
   '13':  { name: 'Date, Transaction (MMDD)', type: 'numeric', length: 4, category: 'Transaction' },
+  '22':  { name: 'POS Entry Mode', type: 'numeric', length: 3, category: 'Terminal' },
   '37':  { name: 'Retrieval Reference Number', type: 'alphanumeric', length: 12, category: 'Transaction' },
   '38':  { name: 'Authorization Identification Response', type: 'alphanumeric', length: 6, category: 'Response' },
   '39':  { name: 'Response Code', type: 'numeric', length: 2, category: 'Response' },
@@ -340,6 +342,18 @@ class ISO8583Message {
     }
   }
 
+  // Remove a field and clear its bitmap bit (used when a magnetic-stripe 0100 carries no DE55).
+  removeField(fieldNumber) {
+    const n = parseInt(fieldNumber, 10);
+    delete this.fields[String(n)];
+    if (n >= 2 && n <= 64) {
+      const byteIndex = Math.floor((n - 1) / 8);
+      const pos = byteIndex * 2;
+      const byteValue = parseInt(this.bitmap.substr(pos, 2), 16) & ~(1 << (7 - ((n - 1) % 8)));
+      this.bitmap = this.bitmap.slice(0, pos) + byteValue.toString(16).padStart(2, '0').toUpperCase() + this.bitmap.slice(pos + 2);
+    }
+  }
+
   getBitmap() {
     return this.bitmap;
   }
@@ -387,6 +401,7 @@ class EMVTransaction {
     this.currency = currencyNumeric(options.currency || 'USD') || '840';
     this.merchantId = options.merchantId || 'MERCHANT01';
     this.terminalId = options.terminalId || 'TERM0001';
+    this.countryCode = options.countryCode || '0840';
     this.now = options.now || new Date();
     this.authIdResponse = null;
     this.stan = this.generateSTAN();
@@ -496,7 +511,7 @@ class EMVTransaction {
     this.emvTags.addTag('9F1A', {
       name: 'Terminal Country Code',
       category: 'Terminal',
-      value: '0840'
+      value: this.countryCode
     });
     this.emvTags.addTag('5F2A', {
       name: 'Transaction Currency Code',
@@ -546,7 +561,7 @@ class EMVTransaction {
       category: 'Response',
       value: Buffer.from(code, 'ascii').toString('hex').toUpperCase()
     });
-    this.iso8583Message.setField('55', this.emvTags.getTLVHex());
+    if (!this.noICC) this.iso8583Message.setField('55', this.emvTags.getTLVHex());
   }
 
   // B2: TVR (95) and TSI (9B) as the terminal had them at 1st GENERATE AC (from the APDU trace),
@@ -555,6 +570,21 @@ class EMVTransaction {
     if (tvr) this.emvTags.addTag('95', { name: 'Terminal Verification Results (TVR)', category: 'Security', value: tvr });
     if (tsi) this.emvTags.addTag('9B', { name: 'Transaction Status Information (TSI)', category: 'Security', value: tsi });
     this.iso8583Message.setField('55', this.emvTags.getTLVHex());
+  }
+
+  // Opt-in entry mode (only when the request supplies entry_mode): DE22 in the 0100, tag 9F39 in
+  // DE55 for chip/contactless, 9F66 (TTQ) for contactless. Magnetic stripe: DE22 only, and the
+  // server removes DE55 (removeField) after the decision. The default 0100 never has DE22.
+  setEntryData({ posEntryMode, entryModeTag, ttq } = {}) {
+    if (posEntryMode) this.iso8583Message.setField('22', posEntryMode);
+    if (entryModeTag) this.emvTags.addTag('9F39', { name: 'POS Entry Mode', category: 'Terminal', value: entryModeTag });
+    if (ttq) this.emvTags.addTag('9F66', { name: 'Terminal Transaction Qualifiers (TTQ)', category: 'Terminal', value: ttq });
+    this.iso8583Message.setField('55', this.emvTags.getTLVHex());
+  }
+
+  removeICCData() {
+    this.noICC = true;
+    this.iso8583Message.removeField('55');
   }
 
   getEMVData() {
@@ -583,7 +613,7 @@ class EMVTransaction {
     msg.setField('39', this.responseCode || req['39']);
     for (const de of ['41', '42', '49']) msg.setField(de, req[de]);
     const tag8A = this.emvTags.getTag('8A');
-    if (tag8A && tag8A.value) msg.setField('55', buildTLV('8A', tag8A.value));
+    if (tag8A && tag8A.value && !this.noICC) msg.setField('55', buildTLV('8A', tag8A.value));
     return messageData(msg);
   }
 

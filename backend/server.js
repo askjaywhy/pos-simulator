@@ -7,8 +7,18 @@ const {
   EMVTags, ISO8583Message, EMVTransaction, isCardExpired, simNow,
   currencyNumeric, CURRENCIES, buildFollowUpMessage
 } = require('./emv-iso8583');
-const { FAULTS, listFaults, buildTrace } = require('./apdu-trace');
+const { FAULTS, listFaults, buildTrace, TTQ, TERMINAL_ERRORS } = require('./apdu-trace');
 const decoder = require('./emv-decoder');
+const terminalConfig = require('./terminal-config');
+const { formatDeviceLog } = require('./device-log');
+
+// Opt-in POS entry modes: DE22 (n3) and tag 9F39. Sent only when the request supplies entry_mode.
+const ENTRY_MODES = {
+  chip: { de22: '051', tag9F39: '05' },
+  contactless: { de22: '071', tag9F39: '07' },
+  swipe: { de22: '901', tag9F39: null },
+  fallback: { de22: '801', tag9F39: null }
+};
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -211,7 +221,8 @@ app.get('/api/iso8583-fields', (req, res) => {
 // Inspect field 55 for a given scheme (visa/mastercard/amex/discover)
 app.get('/api/field55/inspect', (req, res) => {
   const scheme = (req.query.scheme || 'visa').toLowerCase();
-  const tx = new EMVTransaction('demo', '4111111111111111', 12.34, scheme);
+  const cfg = terminalConfig.get();
+  const tx = new EMVTransaction('demo', '4111111111111111', 12.34, scheme, 'contact', { terminalId: cfg.terminal_id, countryCode: cfg.country_code });
 
   res.json({
     scheme,
@@ -223,7 +234,10 @@ app.get('/api/field55/inspect', (req, res) => {
 
 // Process transaction
 app.post('/api/transactions/process', (req, res) => {
-  const { card_number, exp_date, cvv, amount, currency = 'USD', merchant_id = 'MERCHANT01', description = 'Payment', fault } = req.body;
+  const cfg = terminalConfig.get();
+  const { card_number, exp_date, cvv, amount, currency = 'USD', merchant_id: merchantIdIn, description = 'Payment', fault, entry_mode } = req.body;
+  // Default merchant comes from the terminal profile (MERCHANT01 unless changed)
+  const merchant_id = merchantIdIn === undefined ? cfg.merchant_id : merchantIdIn;
 
   // Validation
   if (!card_number || !exp_date || !cvv || !amount) {
@@ -263,6 +277,12 @@ app.post('/api/transactions/process', (req, res) => {
     return res.status(400).json({ error: `Unknown fault (supported: ${Object.keys(FAULTS).join(', ')})` });
   }
 
+  // Opt-in entry mode. Absent/empty = today's behavior (contact trace, no DE22, no 9F39).
+  const entryMode = entry_mode === undefined || entry_mode === null || entry_mode === '' ? null : String(entry_mode).trim().toLowerCase();
+  if (entryMode && !ENTRY_MODES[entryMode]) {
+    return res.status(400).json({ error: `Unsupported entry_mode (supported: ${Object.keys(ENTRY_MODES).join(', ')})` });
+  }
+
   const cleanCardNumber = card_number.replace(/\s/g, '');
   const cardBrand = getCardBrand(cleanCardNumber);
   const transactionId = uuidv4();
@@ -284,7 +304,7 @@ app.post('/api/transactions/process', (req, res) => {
         amount,
         cardBrand.toLowerCase(),
         'contact',
-        { currency: currencyCode, merchantId: merchant_id, now: simNow() }
+        { currency: currencyCode, merchantId: merchant_id, terminalId: cfg.terminal_id, countryCode: cfg.country_code, now: simNow() }
       );
 
       let status, responseCode, declineReason, authCode;
@@ -327,16 +347,33 @@ app.post('/api/transactions/process', (req, res) => {
         expired: Boolean(expired),
         host: { responseCode },
         fault: faultName,
-        now: simNow()
+        now: simNow(),
+        entryMode,
+        config: cfg
       });
 
+      // The trace overrides the host decision when a fault applied, or when the terminal ended the
+      // transaction itself (TERMINATED: AID not in profile, contactless limit, chip card swiped).
       const faultApplied = Boolean(faultName && trace.fault_applied);
-      if (faultApplied) {
+      if (faultApplied || trace.outcome.status === 'TERMINATED') {
         status = trace.outcome.status;
         responseCode = trace.outcome.response_code;
-        declineReason = FAULT_DECLINE_REASONS[status] || FAULT_DECLINE_REASONS[responseCode] || declineReason;
+        if (status === 'TERMINATED') {
+          const r = trace.outcome.reason || 'transaction terminated by the terminal';
+          declineReason = r.charAt(0).toUpperCase() + r.slice(1);
+        } else {
+          declineReason = FAULT_DECLINE_REASONS[status] || FAULT_DECLINE_REASONS[responseCode] || declineReason;
+        }
         if (responseCode !== '00') authCode = null;
       }
+
+      // Opt-in entry mode: DE22, 9F39 (chip/contactless), 9F66 TTQ (contactless)
+      if (entryMode) {
+        const em = ENTRY_MODES[entryMode];
+        transaction.setEntryData({ posEntryMode: em.de22, entryModeTag: em.tag9F39, ttq: entryMode === 'contactless' ? TTQ : null });
+      }
+      // Magnetic stripe: no ICC data in the 0100/0110
+      if (!trace.chip_data) transaction.removeICCData();
 
       // B2: DE55 95/9B carry the terminal's results at 1st GENERATE AC, as in the trace.
       if (trace.first_gen_ac) transaction.setTerminalResults(trace.first_gen_ac);
@@ -351,7 +388,7 @@ app.post('/api/transactions/process', (req, res) => {
         transaction.iso8583Message.fields['55'] = de55.slice(0, -4);
       }
 
-      const emvData = transaction.getEMVData();
+      const emvData = trace.chip_data ? transaction.getEMVData() : null;
       const terminated = status === 'TERMINATED';
       const noHostResponse = terminated || (faultApplied && faultName === 'host_timeout');
       const isoData = terminated ? null : transaction.getISO8583Data();
@@ -387,14 +424,18 @@ app.post('/api/transactions/process', (req, res) => {
           }
 
           const storedTrace = {
-            interface: 'contact',
+            interface: trace.interface,
+            ...(trace.kernel ? { kernel: trace.kernel } : {}),
+            entry_mode: entryMode,
             scheme: cardBrand.toLowerCase(),
             aid: preTags['9F06'].value,
-            fault: faultName ? { name: faultName, applied: faultApplied, note: trace.fault_note } : null,
+            fault: faultName ? { name: faultName, applied: faultApplied, note: trace.fault_note, sdk_error: FAULTS[faultName].sdk_error } : null,
             outcome: { ...trace.outcome, status, response_code: responseCode },
             summary: trace.summary,
             steps: trace.steps,
-            log: trace.log
+            log: trace.log,
+            log_entries: trace.log_entries,
+            terminal: cfg
           };
 
           db.run('INSERT INTO apdu_traces (transaction_id, fault, trace) VALUES (?, ?, ?)',
@@ -415,24 +456,32 @@ app.post('/api/transactions/process', (req, res) => {
                 timestamp: timestamp,
                 card_masked: maskCardNumber(cleanCardNumber),
                 card_brand: cardBrand,
-                emv: {
+                emv: emvData ? {
                   tags: emvData.tags,
                   tlv_hex: emvData.tlv_hex
-                },
+                } : null,
                 iso8583: msgOut(isoData),
                 iso8583_response: msgOut(isoResponse)
               };
 
-              // Default path: the response is exactly as before. Fault requests get extra keys.
-              if (!faultName) return res.json(body);
+              // Default path: the response is exactly as before. Requests with a fault or entry_mode,
+              // and terminal-ended transactions, get extra keys.
+              const sdkError = trace.outcome.sdk_error || null;
+              if (!faultName && !entryMode && !sdkError) return res.json(body);
 
-              body.fault = {
-                name: faultName,
-                applied: faultApplied,
-                description: FAULTS[faultName].description,
-                note: trace.fault_note
-              };
+              if (entryMode) body.entry_mode = entryMode;
+              if (sdkError) body.sdk_error = sdkError;
+              if (faultName) {
+                body.fault = {
+                  name: faultName,
+                  applied: faultApplied,
+                  sdk_error: FAULTS[faultName].sdk_error,
+                  description: FAULTS[faultName].description,
+                  note: trace.fault_note
+                };
+              }
               body.apdu_trace = `/api/transactions/${transactionId}/apdu-trace`;
+              body.device_log = `/api/transactions/${transactionId}/device-log`;
 
               if (!(faultApplied && trace.outcome.reversal_required)) return res.json(body);
 
@@ -463,7 +512,6 @@ app.post('/api/transactions/process', (req, res) => {
 
 // Decline reasons for fault outcomes (by status first, then by response code)
 const FAULT_DECLINE_REASONS = {
-  TERMINATED: 'Application not found on card (SELECT returned 6A82); transaction terminated',
   TIMEOUT_REVERSED: 'Unable to go online (host timeout); authorization reversed',
   DECLINED_BY_CARD: 'Card declined after issuer approval (issuer authentication failed); authorization reversed',
   CARD_REMOVED_REVERSED: 'Card removed before completion; authorization reversed',
@@ -707,12 +755,42 @@ app.get('/api/transactions/:id/apdu-trace', (req, res) => {
       if (!row.trace) return res.status(404).json({ error: 'No APDU trace for this transaction' });
       const iso = JSON.parse(row.iso8583_message);
       const de55 = iso && iso.fields && iso.fields['55'] ? iso.fields['55'].value : null;
+      const { log_entries, terminal, ...trace } = JSON.parse(row.trace);
       res.json({
         transaction_id: row.id,
-        ...JSON.parse(row.trace),
+        ...trace,
         de55_check: de55 ? decoder.checkDE55(de55) : null
       });
     });
+});
+
+// Device log: the trace as an Android logcat (threadtime) log, as a terminal SDK would write it.
+// text/plain by default; ?format=json returns { transaction_id, lines }.
+app.get('/api/transactions/:id/device-log', (req, res) => {
+  db.get('SELECT t.id, a.trace FROM transactions t LEFT JOIN apdu_traces a ON a.transaction_id = t.id WHERE t.id = ?',
+    [req.params.id], (err, row) => {
+      if (err) return res.status(500).json({ error: 'Database error' });
+      if (!row) return res.status(404).json({ error: 'Transaction not found' });
+      if (!row.trace) return res.status(404).json({ error: 'No device log for this transaction' });
+      const lines = formatDeviceLog(row.id, JSON.parse(row.trace));
+      if (req.query.format === 'json') return res.json({ transaction_id: row.id, lines });
+      res.type('text/plain').send(lines.join('\n') + '\n');
+    });
+});
+
+// Terminal profile (what TMS would push). Defaults = the simulator's previous hard-coded values.
+app.get('/api/terminal/config', (req, res) => {
+  res.json({ config: terminalConfig.get(), defaults: terminalConfig.DEFAULTS, terminal_errors: TERMINAL_ERRORS });
+});
+
+app.put('/api/terminal/config', (req, res) => {
+  const r = terminalConfig.update(req.body);
+  if (!r.ok) return res.status(400).json({ error: 'Invalid terminal config', details: r.errors });
+  res.json({ config: r.config });
+});
+
+app.delete('/api/terminal/config', (req, res) => {
+  res.json({ config: terminalConfig.reset(), reset: true });
 });
 
 // Fault catalogue for POST /api/transactions/process { ..., "fault": "<name>" }
@@ -741,6 +819,7 @@ app.post('/api/tools/emv-decode', (req, res) => {
 
 // Reset database
 app.post('/api/admin/reset', (req, res) => {
+  terminalConfig.reset();
   db.run('DELETE FROM apdu_traces');
   db.run('DELETE FROM reversals');
   db.run('DELETE FROM refunds');
@@ -772,10 +851,13 @@ initializeDatabase().then(() => {
   console.log('  POST /api/transactions/:id/refund     - Refund (APPROVED only; optional {amount}; capped)');
   console.log('  GET  /api/transactions/:id/refunds    - List refunds for a transaction');
   console.log('  POST /api/transactions/:id/reversal   - Reverse an APPROVED auth with no refunds (0400)');
-  console.log('  GET  /api/transactions/:id/apdu-trace - Card/terminal APDU trace, TVR/TSI/CVM/CID explained\n');
+  console.log('  GET  /api/transactions/:id/apdu-trace - Card/terminal APDU trace, TVR/TSI/CVM/CID explained');
+  console.log('  GET  /api/transactions/:id/device-log - Trace as a logcat (threadtime) device log\n');
   console.log('🧰 SUPPORT TOOLS:');
   console.log('  GET  /api/faults                      - Fault catalogue (opt-in "fault" on /process)');
-  console.log('  POST /api/tools/emv-decode            - Decode TVR/TSI/CVM/CID/SW/TLV/DE55/APDU log\n');
+  console.log('  POST /api/tools/emv-decode            - Decode TVR/TSI/CVM/CID/SW/TLV/DE55/APDU log');
+  console.log('  GET  /api/terminal/config             - Terminal profile (TID, MID, AIDs, CAPKs, limits)');
+  console.log('  PUT  /api/terminal/config             - Update the profile (partial); DELETE restores defaults\n');
   console.log('🧪 UTILITY ENDPOINTS:');
   console.log('  GET  /api/test-cards                  - Get test card numbers');
   console.log('  GET  /api/health                      - Health check');

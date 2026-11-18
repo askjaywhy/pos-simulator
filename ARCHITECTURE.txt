@@ -111,7 +111,11 @@ Simulator only: not EMV- or network-certified. Cryptograms and the unpredictable
   derived from the STAN (same value as the trace's GENERATE AC responses).
   95/9B = TVR/TSI at 1st GENERATE AC, taken from the APDU trace: default 0000008000 / E800
   (floor limit 0); expired card 0040008000; pin_try_limit fault 0000A08000.
+  Opt-in entry_mode adds 9F39 (chip 05, contactless 07) and, for contactless, 9F66 TTQ 36004000
+  (TSI 0000 for contactless). fallback/swipe send no DE55 (DE22 801/901 only).
   AIDs: Visa A0000000031010, Mastercard A0000000041010, Amex A00000002501, Discover A0000001523010.
+  The terminal profile (backend/terminal-config.js) supplies DE41, the default DE42, 9F1A, the
+  supported AIDs, CAPK indexes, the floor limit and the contactless CVM / transaction limits.
   5F2A = 0 + DE49. 9A/9F21 = local date/time. 9F26 / 9F37 are fixed samples.
   Tests assert presence and format, never cryptogram values.
 

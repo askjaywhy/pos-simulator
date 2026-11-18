@@ -20,7 +20,14 @@ page-object UI test layer for this simulator. These rules bind all of them.
 - **DE55 (B1/B2):** the 0100 carries 82, 9F02 (= DE4), 9F03, 9F27 (80), 9F36 plus the earlier tags;
   95/9B come from the trace at 1st GENERATE AC (default `0000008000` / `E800`). Spec:
   `de55-completeness.spec.js` (13). `9F07` must stay the last DE55 tag (the `malformed_tlv` fault
-  truncates it).
+  truncates it; new DE55 tags go in the `EMV_TAGS` dictionary before it).
+- **Mock SDK phase 1:** opt-in `entry_mode` (chip/contactless/swipe/fallback → DE22, 9F39, 9F66,
+  contactless or magstripe trace), terminal profile `GET/PUT/DELETE /api/terminal/config`,
+  `GET /api/transactions/:id/device-log`, `sdk_error` on faults. Specs: `entry-mode.spec.js` (13),
+  `terminal-config.spec.js` (12), `device-log.spec.js` (14). **The terminal profile is global
+  server state:** any test that changes it must restore it (`DELETE /api/terminal/config` in
+  `afterEach`). Defaults must stay equal to TID `TERM0001`, MID `MERCHANT01`, country `0840`,
+  the 4 AIDs, CAPK `09`, floor 0, or the trace/DE55 assertions break.
 
 ## Test cards (from `backend/server.js` TEST_CARDS and the UI dropdown)
 | Card (mask in output) | Brand | Expected |
