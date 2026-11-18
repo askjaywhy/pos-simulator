@@ -93,11 +93,10 @@ test.describe('APDU trace', () => {
     expect(t.log.at(-1)).toContain('Transaction result: APPROVED');
   });
 
-  test('de55_check reports the tags missing from the 0100', async ({ request }) => {
+  test('de55_check: the 0100 DE55 has every commonly required tag (B1)', async ({ request }) => {
     const tx = await pay(request, '4111111111111111', 75);
     const t = await trace(request, tx.transaction_id);
-    expect(t.de55_check.parse_errors).toEqual([]);
-    expect(t.de55_check.missing_required.map((m) => m.tag)).toEqual(['82', '9F02', '9F03', '9F27', '9F36']);
+    expect(t.de55_check).toMatchObject({ ok: true, parse_errors: [], missing_required: [] });
   });
 
   test('unknown transaction -> 404', async ({ request }) => {

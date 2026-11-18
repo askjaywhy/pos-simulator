@@ -17,6 +17,10 @@ page-object UI test layer for this simulator. These rules bind all of them.
   has `GET /api/transactions/:id/apdu-trace`. `fault` on `/process` is opt-in; without it the
   response is unchanged. Specs: `apdu-trace.spec.js` (15), `fault-injection.spec.js` (14). New
   statuses from faults: `TERMINATED`, `TIMEOUT_REVERSED`, `DECLINED_BY_CARD`, `CARD_REMOVED_REVERSED`.
+- **DE55 (B1/B2):** the 0100 carries 82, 9F02 (= DE4), 9F03, 9F27 (80), 9F36 plus the earlier tags;
+  95/9B come from the trace at 1st GENERATE AC (default `0000008000` / `E800`). Spec:
+  `de55-completeness.spec.js` (13). `9F07` must stay the last DE55 tag (the `malformed_tlv` fault
+  truncates it).
 
 ## Test cards (from `backend/server.js` TEST_CARDS and the UI dropdown)
 | Card (mask in output) | Brand | Expected |

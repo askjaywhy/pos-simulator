@@ -10,7 +10,7 @@
 // are never logged in clear. Cryptograms, ARPCs and SDAD are deterministic placeholders.
 
 const crypto = require('crypto');
-const { buildTLV } = require('./emv-iso8583');
+const { buildTLV, CARD_AIP, atcFromStan } = require('./emv-iso8583');
 const { decodeTVR, decodeTSI, decodeCVMResults, decodeCID, decodeSW, commandName } = require('./emv-decoder');
 
 // ------------------------
@@ -73,7 +73,7 @@ const CVM_LIST = '00001388' + '00000000' + '1F06' + '4103' + '1E03'; // X=50.00,
 const CDOL1 = '9F02069F03069F1A0295055F2A029A039C019F3704';
 const CDOL2 = '8A02' + CDOL1;
 const PDOL = '9F02065F2A029A039C019F3704';
-const AIP = '3C00'; // DDA, cardholder verification, terminal risk management, issuer authentication supported
+const AIP = CARD_AIP; // DDA, cardholder verification, terminal risk management, issuer authentication supported
 const AFL = '08010100' + '10010101'; // SFI 1 rec 1; SFI 2 rec 1 (used in ODA)
 const IAD = '06010A03A00000';
 
@@ -221,12 +221,14 @@ function buildTrace(input) {
   // 8. Terminal action analysis -> 1st GENERATE AC (ARQC)
   const tvrHex = () => tvr.map((b) => h(b, 1)).join('');
   const cdol1Data = () => amount + '000000000000' + input.country + tvrHex() + bcd(input.currencyNumeric, 2) + input.date + '00' + input.un;
-  const atc = h((parseInt(input.stan, 10) || 1) % 0xFFFF, 2);
+  const atc = atcFromStan(input.stan);
   const d1 = cdol1Data();
   apdu('1st Generate AC', '80AE8000' + h(d1.length / 2, 1) + d1 + '00',
     buildTLV('77', buildTLV('9F27', '80') + buildTLV('9F36', atc) + buildTLV('9F26', input.cryptogram) + buildTLV('9F10', IAD)), '9000');
   tsi |= 0x20;
   const cid1 = '80';
+  // Snapshot sent in the 0100's DE55 (server.js -> setTerminalResults)
+  const firstGenAc = { tvr: tvrHex(), tsi: h(tsi, 1) + '00', atc, cid: cid1 };
   logLine('I', 'EMVKernel', `ARQC received; TVR=${tvrHex()} CVMR=${cvmr}`);
 
   // 9. Online authorization
@@ -302,7 +304,8 @@ function buildTrace(input) {
     steps, log, summary,
     outcome: { status: terminalDecision, response_code: received ? hostCode : 'Z3', terminal_decision: terminalDecision, reversal_required: reversalRequired },
     fault_applied: faultApplied,
-    fault_note: faultNote
+    fault_note: faultNote,
+    first_gen_ac: firstGenAc
   };
 }
 

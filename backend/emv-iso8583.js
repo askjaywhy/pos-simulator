@@ -4,13 +4,16 @@
 const EMV_TAGS = {
   '9F06': { name: 'Application Identifier (AID) - terminal', category: 'Application' },
   '5F2A': { name: 'Transaction Currency Code', category: 'Transaction' },
+  '82':   { name: 'Application Interchange Profile (AIP)', category: 'Application' },
   '9F26': { name: 'Application Cryptogram', category: 'Cryptography' },
   '95':   { name: 'Terminal Verification Results (TVR)', category: 'Security' },
   '9B':   { name: 'Transaction Status Information (TSI)', category: 'Security' },
   '9F27': { name: 'Cryptogram Information Data', category: 'Cryptography' },
+  '9F36': { name: 'Application Transaction Counter (ATC)', category: 'Application' },
   '9F10': { name: 'Issuer Application Data (IAD)', category: 'Application' },
   '9F37': { name: 'Unpredictable Number', category: 'Security' },
   '9F02': { name: 'Amount, Authorised', category: 'Transaction' },
+  '9F03': { name: 'Amount, Other', category: 'Transaction' },
   '9F1A': { name: 'Terminal Country Code', category: 'Terminal' },
   '9C':   { name: 'Transaction Type', category: 'Transaction' },
   '9A':   { name: 'Transaction Date', category: 'Transaction' },
@@ -103,6 +106,22 @@ function currencyNumeric(code) {
   if (typeof code !== 'string') return null;
   return CURRENCIES[code.trim().toUpperCase()] || null;
 }
+
+// Card profile shared with the APDU trace (apdu-trace.js): AIP = DDA, cardholder verification,
+// terminal risk management and issuer authentication supported.
+const CARD_AIP = '3C00';
+
+// Tag 9F36: the simulated card's ATC, derived from the STAN so the trace and DE55 agree.
+function atcFromStan(stan) {
+  return ((parseInt(stan, 10) || 1) % 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+}
+
+// Terminal results at 1st GENERATE AC for a plain online-only contact sale (floor limit 0):
+// TVR byte 4 bit 8 "exceeds floor limit"; TSI = ODA, CVM, card risk mgmt, terminal risk mgmt.
+// The 0100 is sent after 1st GENERATE AC, so DE55 carries these pre-online values (no issuer
+// authentication yet). The server overrides them from the transaction's APDU trace.
+const DEFAULT_TVR = '0000008000';
+const DEFAULT_TSI = 'E800';
 
 // DE11: sequential STAN per backend process, 000001-999999, then wraps to 000001.
 let stanCounter = 0;
@@ -457,12 +476,12 @@ class EMVTransaction {
     this.emvTags.addTag('95', {
       name: 'Terminal Verification Results (TVR)',
       category: 'Security',
-      value: '0000000000'
+      value: DEFAULT_TVR
     });
     this.emvTags.addTag('9B', {
       name: 'Transaction Status Information (TSI)',
       category: 'Security',
-      value: '0000'
+      value: DEFAULT_TSI
     });
     this.emvTags.addTag('9F37', {
       name: 'Unpredictable Number',
@@ -500,6 +519,14 @@ class EMVTransaction {
       value: timeHHMMSS
     });
 
+    // DE55 completeness (B1): tags commonly required for an online (ARQC) authorization
+    const amountN12 = this.iso8583Message.fields['4'];
+    this.emvTags.addTag('82', { name: 'Application Interchange Profile (AIP)', category: 'Application', value: CARD_AIP });
+    this.emvTags.addTag('9F02', { name: 'Amount, Authorised', category: 'Transaction', value: amountN12 });
+    this.emvTags.addTag('9F03', { name: 'Amount, Other', category: 'Transaction', value: '000000000000' });
+    this.emvTags.addTag('9F27', { name: 'Cryptogram Information Data', category: 'Cryptography', value: '80' }); // ARQC
+    this.emvTags.addTag('9F36', { name: 'Application Transaction Counter (ATC)', category: 'Application', value: atcFromStan(this.stan) });
+
     // Field 55: EMV TLV
     const tlvHex = this.emvTags.getTLVHex();
     this.iso8583Message.setField('55', tlvHex);
@@ -519,6 +546,14 @@ class EMVTransaction {
       category: 'Response',
       value: Buffer.from(code, 'ascii').toString('hex').toUpperCase()
     });
+    this.iso8583Message.setField('55', this.emvTags.getTLVHex());
+  }
+
+  // B2: TVR (95) and TSI (9B) as the terminal had them at 1st GENERATE AC (from the APDU trace),
+  // so DE55 agrees with the trace (e.g. expired card, PIN try limit exceeded).
+  setTerminalResults({ tvr, tsi } = {}) {
+    if (tvr) this.emvTags.addTag('95', { name: 'Terminal Verification Results (TVR)', category: 'Security', value: tvr });
+    if (tsi) this.emvTags.addTag('9B', { name: 'Transaction Status Information (TSI)', category: 'Security', value: tsi });
     this.iso8583Message.setField('55', this.emvTags.getTLVHex());
   }
 
@@ -625,6 +660,10 @@ module.exports = {
   localStamp,
   retrievalRef,
   buildFollowUpMessage,
+  CARD_AIP,
+  atcFromStan,
+  DEFAULT_TVR,
+  DEFAULT_TSI,
   buildTLV,
   decodeTLV,
   prettyPrintTLV,

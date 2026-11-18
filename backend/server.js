@@ -338,6 +338,9 @@ app.post('/api/transactions/process', (req, res) => {
         if (responseCode !== '00') authCode = null;
       }
 
+      // B2: DE55 95/9B carry the terminal's results at 1st GENERATE AC, as in the trace.
+      if (trace.first_gen_ac) transaction.setTerminalResults(trace.first_gen_ac);
+
       // DEF-002: DE39 and tag 8A must reflect the decision, not a hard-coded 00.
       // The auth code becomes DE38 in the 0110 response.
       if (responseCode) transaction.setAuthorizationResult(responseCode, authCode);

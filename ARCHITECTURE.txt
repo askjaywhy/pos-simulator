@@ -104,8 +104,13 @@ Simulator only: not EMV- or network-certified. Cryptograms and the unpredictable
 5. EMV (DE55)
 =====================================================================================
 
-  Emitted per transaction: 9F06 AID, 9F08, 9F07, 9F26, 95, 9B, 9F37, 9F10, 9F1A, 5F2A,
-  9C, 9A, 9F21, plus 8A once the decision is set.
+  Emitted per transaction: 82, 95, 9F06 AID, 5F2A, 9F26, 9B, 9F27, 9F36, 9F10, 9F37, 9F02,
+  9F03, 9F1A, 9C, 9A, 9F21, 9F08, 9F07, plus 8A once the decision is set. That covers the tags
+  commonly required for an online (ARQC) auth.
+  82 = 3C00 (shared with the APDU trace). 9F02 = DE4. 9F03 = 0. 9F27 = 80 (ARQC). 9F36 = ATC
+  derived from the STAN (same value as the trace's GENERATE AC responses).
+  95/9B = TVR/TSI at 1st GENERATE AC, taken from the APDU trace: default 0000008000 / E800
+  (floor limit 0); expired card 0040008000; pin_try_limit fault 0000A08000.
   AIDs: Visa A0000000031010, Mastercard A0000000041010, Amex A00000002501, Discover A0000001523010.
   5F2A = 0 + DE49. 9A/9F21 = local date/time. 9F26 / 9F37 are fixed samples.
   Tests assert presence and format, never cryptogram values.

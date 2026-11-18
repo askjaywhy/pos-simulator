@@ -39,7 +39,7 @@ Full guide: [`lab/README.md`](lab/README.md) · Java suite: [`lab/java-tests/REA
 
 ## 📋 Quick Features
 
-- ✅ **EMV TLV** - 24-tag dictionary; 13 scheme-flavored tags plus 8A emitted in DE55 (simulated values, no real cryptogram)
+- ✅ **EMV TLV** - 27-tag dictionary; 18 tags plus 8A emitted in DE55, including everything commonly required for an online auth (82, 9F02, 9F03, 9F27, 9F36); TVR/TSI match the APDU trace at 1st GENERATE AC (simulated values, no real cryptogram)
 - ✅ **ISO 8583** - 0100 request and 0110 response, 0200 refund and 0400 reversal messages, plus a 24-field reference dictionary
 - ✅ **Test Cards** - 4 approval brands and 4 decline codes (05, 41, 51, 54)
 - ✅ **RESTful API** - Transaction processing, history, refunds, EMV and ISO 8583 inspection
@@ -118,7 +118,7 @@ pos-simulator/
 ### Backend (Node.js + Express)
 - **server.js** - RESTful API with 14 endpoints
 - **emv-iso8583.js** - Core payment processing module
-  - `EMVTags` class - 24-tag dictionary with TLV encode/decode
+  - `EMVTags` class - 27-tag dictionary with TLV encode/decode
   - `ISO8583Message` class - Builds ISO 8583 messages with hex output
   - `EMVTransaction` class - Complete transaction processing
 - **SQLite** - In-memory transaction database
@@ -206,7 +206,9 @@ selection, GPO, READ RECORD, DDA, CVM (No CVM under 50.00, else offline PIN), te
 management (floor limit 0), 1st GENERATE AC (ARQC), the 0100/0110, EXTERNAL AUTHENTICATE and
 2nd GENERATE AC (TC or AAC). Without a fault it never changes the result. The PAN is masked with
 F nibbles and PIN blocks are never logged in clear. Cryptograms, ARPCs and SDAD are placeholders.
-`de55_check` lists tags commonly required in an online-auth DE55 that the 0100 lacks.
+`de55_check` checks the 0100's DE55 against the tags commonly required for an online auth (all present
+since B1). DE55 `95`/`9B` are the TVR/TSI at 1st GENERATE AC, so they match the trace; the trace's
+final TSI adds issuer authentication (`F800`), and post-online TVR bits (e.g. issuer auth failed) appear only in the trace.
 
 ### Fault Injection (opt-in)
 ```bash
