@@ -43,6 +43,8 @@ Full guide: [`lab/README.md`](lab/README.md) · Java suite: [`lab/java-tests/REA
 - ✅ **ISO 8583** - 0100 request and 0110 response, 0200 refund and 0400 reversal messages, plus a 24-field reference dictionary
 - ✅ **Test Cards** - 4 approval brands and 4 decline codes (05, 41, 51, 54)
 - ✅ **RESTful API** - Transaction processing, history, refunds, EMV and ISO 8583 inspection
+- ✅ **APDU trace + decoder** - Every transaction gets a contact EMV kernel trace (C-APDU / R-APDU, status words, TVR/TSI/CVM/CID explained, logcat-style log); `tools/emv-decode.js` decodes TVR, TSI, CVM, CID, SW, TLV, DE55 and raw APDU logs
+- ✅ **Fault injection** - Opt-in `fault` on `/process`: app not found (6A82), PIN try limit (6983), malformed DE55, host timeout with timeout reversal, issuer 91/96, issuer authentication failure (6300), card removed before 2nd GENERATE AC
 - ✅ **Interactive UI** - Terminal simulator with EMV and ISO 8583 tabs
 - ✅ **Automated Tests** - Playwright API specs plus a page-object UI suite with a visual baseline
 - ✅ **Agentic test kit** - Claude Code planner, generator and locator-only healer, held in check by hook guards (see below)
@@ -193,6 +195,50 @@ POST /api/transactions/{id}/reversal
 ```
 A reversed transaction can't be refunded.
 
+### APDU Trace
+```bash
+GET /api/transactions/{id}/apdu-trace
+# Response: { transaction_id, interface, scheme, aid, fault, outcome, summary { tvr, tsi, cvm_results,
+#             cid_first, cid_final, explained }, steps [...], log [...], de55_check }
+```
+The trace simulates the card/terminal dialogue around the simulator's host decision: PSE and AID
+selection, GPO, READ RECORD, DDA, CVM (No CVM under 50.00, else offline PIN), terminal risk
+management (floor limit 0), 1st GENERATE AC (ARQC), the 0100/0110, EXTERNAL AUTHENTICATE and
+2nd GENERATE AC (TC or AAC). Without a fault it never changes the result. The PAN is masked with
+F nibbles and PIN blocks are never logged in clear. Cryptograms, ARPCs and SDAD are placeholders.
+`de55_check` lists tags commonly required in an online-auth DE55 that the 0100 lacks.
+
+### Fault Injection (opt-in)
+```bash
+GET  /api/faults                                    # catalogue: name, stage, description, expected
+POST /api/transactions/process  { ..., "fault": "host_timeout" }
+# Extra keys on fault requests only: fault { name, applied, description, note }, apdu_trace,
+# and reversal { reversal_id, reason, iso8583 (0400) } when the terminal must reverse.
+```
+| Fault | Result |
+|---|---|
+| `app_not_found` | SELECT 6A82, `TERMINATED`, no host messages (`iso8583` null) |
+| `pin_try_limit` | VERIFY 6983, TVR byte 3, DE39 75 (only above the 50.00 No-CVM limit) |
+| `malformed_tlv` | DE55 truncated by 2 bytes, DE39 30; `emv.tlv_hex` stays intact |
+| `host_timeout` | no 0110, ARC Z3, AAC, `TIMEOUT_REVERSED` + 0400 |
+| `issuer_91` / `issuer_96` | DE39 91 / 96, AAC |
+| `issuer_auth_failed` | DE39 00, EXTERNAL AUTHENTICATE 6300, AAC, `DECLINED_BY_CARD` + 0400 |
+| `card_removed` | DE39 00, no response to 2nd GENERATE AC, `CARD_REMOVED_REVERSED` + 0400 |
+
+A fault that can't apply (PIN fault under 50.00, post-approval fault on a declined card) returns
+`applied: false` with a note. Requests without `fault` return exactly the same response as before.
+
+### EMV Decoder
+```bash
+POST /api/tools/emv-decode   { tvr, tsi, cvm_results, cid, sw, cvm_list, tlv_hex, de55, log }   # any subset
+
+node tools/emv-decode.js tvr 0000208040
+node tools/emv-decode.js tlv 770F9F2701409F360200019F3403410302
+node tools/emv-decode.js de55 <hex>
+node tools/emv-decode.js log customer-logcat.txt        # finds non-9000 SWs, missing responses, TVR bits
+node tools/emv-decode.js trace <transaction_id> --save trace.log
+```
+
 ### Pinning the Clock (`SIM_NOW`)
 Expiry checks (DE14 / `exp_date`) use the current UTC month. Set `SIM_NOW` before starting the
 backend to pin "now" to any Date-parsable value; invalid values are ignored.
@@ -231,7 +277,12 @@ GET  /api/transactions/:id/iso8583           # ISO 8583 data
 POST /api/transactions/:id/refund            # Refund (full or partial)
 GET  /api/transactions/:id/refunds           # Refunds recorded + remaining amount
 POST /api/transactions/:id/reversal          # Reverse an APPROVED auth with no refunds (0400)
+GET  /api/transactions/:id/apdu-trace        # Card/terminal APDU trace, TVR/TSI/CVM/CID explained
 GET  /api/field55/inspect?scheme=visa        # Sample DE55 / ISO message, no transaction
+
+# Support tools
+GET  /api/faults                             # Fault catalogue (opt-in "fault" on /process)
+POST /api/tools/emv-decode                   # Decode TVR/TSI/CVM/CID/SW/TLV/DE55/APDU log
 
 # Utilities
 GET  /api/health                             # Health check

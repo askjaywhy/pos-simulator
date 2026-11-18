@@ -7,6 +7,8 @@ const {
   EMVTags, ISO8583Message, EMVTransaction, isCardExpired, simNow,
   currencyNumeric, CURRENCIES, buildFollowUpMessage
 } = require('./emv-iso8583');
+const { FAULTS, listFaults, buildTrace } = require('./apdu-trace');
+const decoder = require('./emv-decoder');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -69,6 +71,18 @@ function initializeDatabase() {
           amount_minor INTEGER NOT NULL,
           timestamp TEXT,
           iso8583_message TEXT
+        )
+      `, (err) => {
+        if (err) reject(err);
+      });
+
+      // APDU traces: one per transaction (card <-> terminal dialogue, host events, terminal decision).
+      // Kept out of the transactions table so existing rows and responses keep their shape.
+      db.run(`
+        CREATE TABLE IF NOT EXISTS apdu_traces (
+          transaction_id TEXT PRIMARY KEY,
+          fault TEXT,
+          trace TEXT
         )
       `, (err) => {
         if (err) reject(err);
@@ -209,7 +223,7 @@ app.get('/api/field55/inspect', (req, res) => {
 
 // Process transaction
 app.post('/api/transactions/process', (req, res) => {
-  const { card_number, exp_date, cvv, amount, currency = 'USD', merchant_id = 'MERCHANT01', description = 'Payment' } = req.body;
+  const { card_number, exp_date, cvv, amount, currency = 'USD', merchant_id = 'MERCHANT01', description = 'Payment', fault } = req.body;
 
   // Validation
   if (!card_number || !exp_date || !cvv || !amount) {
@@ -243,6 +257,12 @@ app.post('/api/transactions/process', (req, res) => {
   }
   const currencyCode = currency.trim().toUpperCase();
 
+  // Opt-in fault injection (see GET /api/faults). Absent/empty = normal processing.
+  const faultName = fault === undefined || fault === null || fault === '' ? null : String(fault).trim().toLowerCase();
+  if (faultName && !FAULTS[faultName]) {
+    return res.status(400).json({ error: `Unknown fault (supported: ${Object.keys(FAULTS).join(', ')})` });
+  }
+
   const cleanCardNumber = card_number.replace(/\s/g, '');
   const cardBrand = getCardBrand(cleanCardNumber);
   const transactionId = uuidv4();
@@ -268,13 +288,14 @@ app.post('/api/transactions/process', (req, res) => {
       );
 
       let status, responseCode, declineReason, authCode;
+      const expired = !row && isCardExpired(exp_date);
 
       if (row) {
         status = 'DECLINED';
         responseCode = row.response_code;
         declineReason = row.decline_reason;
         authCode = null;
-      } else if (isCardExpired(exp_date)) {
+      } else if (expired) {
         // DEF-005: an exact-PAN decline rule wins; otherwise an expired card is declined 54
         status = 'DECLINED';
         responseCode = '54';
@@ -287,13 +308,52 @@ app.post('/api/transactions/process', (req, res) => {
         authCode = 'AUTH' + transactionId.substring(0, 6).toUpperCase();
       }
 
+      // Card <-> terminal trace around the host decision. With no fault (or a fault that can't
+      // apply) the trace only explains the decision above; it never changes it.
+      const preTags = transaction.getEMVData().tags;
+      const trace = buildTrace({
+        transactionId,
+        scheme: cardBrand.toLowerCase(),
+        aid: preTags['9F06'].value,
+        pan: cleanCardNumber,
+        exp: exp_date,
+        amountMinor: parseAmountMinor(amount),
+        currencyNumeric: currencyNumeric(currencyCode),
+        country: preTags['9F1A'].value,
+        date: preTags['9A'].value,
+        un: preTags['9F37'].value,
+        stan: transaction.stan,
+        cryptogram: preTags['9F26'].value,
+        expired: Boolean(expired),
+        host: { responseCode },
+        fault: faultName,
+        now: simNow()
+      });
+
+      const faultApplied = Boolean(faultName && trace.fault_applied);
+      if (faultApplied) {
+        status = trace.outcome.status;
+        responseCode = trace.outcome.response_code;
+        declineReason = FAULT_DECLINE_REASONS[status] || FAULT_DECLINE_REASONS[responseCode] || declineReason;
+        if (responseCode !== '00') authCode = null;
+      }
+
       // DEF-002: DE39 and tag 8A must reflect the decision, not a hard-coded 00.
       // The auth code becomes DE38 in the 0110 response.
-      transaction.setAuthorizationResult(responseCode, authCode);
+      if (responseCode) transaction.setAuthorizationResult(responseCode, authCode);
+
+      // malformed_tlv: the packer drops the last 2 bytes of DE55 in the 0100 (emv.tlv_hex stays intact)
+      if (faultApplied && faultName === 'malformed_tlv') {
+        const de55 = transaction.iso8583Message.fields['55'];
+        transaction.iso8583Message.fields['55'] = de55.slice(0, -4);
+      }
 
       const emvData = transaction.getEMVData();
-      const isoData = transaction.getISO8583Data();
-      const isoResponse = transaction.getResponseISO8583Data();
+      const terminated = status === 'TERMINATED';
+      const noHostResponse = terminated || (faultApplied && faultName === 'host_timeout');
+      const isoData = terminated ? null : transaction.getISO8583Data();
+      const isoResponse = noHostResponse ? null : transaction.getResponseISO8583Data();
+      const msgOut = (m) => (m ? { mti: m.mti, fields: m.fields, hex_message: m.hex_message } : null);
 
       // Store in database
       db.run(
@@ -323,38 +383,92 @@ app.post('/api/transactions/process', (req, res) => {
             return res.status(500).json({ error: 'Failed to store transaction' });
           }
 
-          res.json({
-            success: status === 'APPROVED',
-            transaction_id: transactionId,
-            status: status,
-            response_code: responseCode,
-            decline_reason: declineReason,
-            auth_code: authCode,
-            amount: amount,
-            currency: currencyCode,
-            timestamp: timestamp,
-            card_masked: maskCardNumber(cleanCardNumber),
-            card_brand: cardBrand,
-            emv: {
-              tags: emvData.tags,
-              tlv_hex: emvData.tlv_hex
-            },
-            iso8583: {
-              mti: isoData.mti,
-              fields: isoData.fields,
-              hex_message: isoData.hex_message
-            },
-            iso8583_response: {
-              mti: isoResponse.mti,
-              fields: isoResponse.fields,
-              hex_message: isoResponse.hex_message
-            }
-          });
+          const storedTrace = {
+            interface: 'contact',
+            scheme: cardBrand.toLowerCase(),
+            aid: preTags['9F06'].value,
+            fault: faultName ? { name: faultName, applied: faultApplied, note: trace.fault_note } : null,
+            outcome: { ...trace.outcome, status, response_code: responseCode },
+            summary: trace.summary,
+            steps: trace.steps,
+            log: trace.log
+          };
+
+          db.run('INSERT INTO apdu_traces (transaction_id, fault, trace) VALUES (?, ?, ?)',
+            [transactionId, faultName, JSON.stringify(storedTrace)], (errT) => {
+              if (errT) {
+                return res.status(500).json({ error: 'Failed to store APDU trace' });
+              }
+
+              const body = {
+                success: status === 'APPROVED',
+                transaction_id: transactionId,
+                status: status,
+                response_code: responseCode,
+                decline_reason: declineReason,
+                auth_code: authCode,
+                amount: amount,
+                currency: currencyCode,
+                timestamp: timestamp,
+                card_masked: maskCardNumber(cleanCardNumber),
+                card_brand: cardBrand,
+                emv: {
+                  tags: emvData.tags,
+                  tlv_hex: emvData.tlv_hex
+                },
+                iso8583: msgOut(isoData),
+                iso8583_response: msgOut(isoResponse)
+              };
+
+              // Default path: the response is exactly as before. Fault requests get extra keys.
+              if (!faultName) return res.json(body);
+
+              body.fault = {
+                name: faultName,
+                applied: faultApplied,
+                description: FAULTS[faultName].description,
+                note: trace.fault_note
+              };
+              body.apdu_trace = `/api/transactions/${transactionId}/apdu-trace`;
+
+              if (!(faultApplied && trace.outcome.reversal_required)) return res.json(body);
+
+              // Terminal-initiated reversal (0400) for an auth the card or host flow did not complete
+              const amountMinor = parseAmountMinor(amount);
+              const reversalId = uuidv4();
+              const revIso = buildFollowUpMessage({
+                mti: '0400',
+                processingCode: '000000',
+                amountMinor,
+                originalTransactionId: transactionId,
+                originalFields: isoData.fields
+              });
+              db.run('INSERT INTO reversals (id, transaction_id, amount_minor, timestamp, iso8583_message) VALUES (?, ?, ?, ?, ?)',
+                [reversalId, transactionId, amountMinor, new Date().toISOString(), JSON.stringify(revIso)], (errR) => {
+                  if (errR) {
+                    return res.status(500).json({ error: 'Failed to store reversal' });
+                  }
+                  body.reversal = { reversal_id: reversalId, reason: 'terminal_initiated', iso8583: revIso };
+                  res.json(body);
+                });
+            });
         }
       );
     }
   );
 });
+
+// Decline reasons for fault outcomes (by status first, then by response code)
+const FAULT_DECLINE_REASONS = {
+  TERMINATED: 'Application not found on card (SELECT returned 6A82); transaction terminated',
+  TIMEOUT_REVERSED: 'Unable to go online (host timeout); authorization reversed',
+  DECLINED_BY_CARD: 'Card declined after issuer approval (issuer authentication failed); authorization reversed',
+  CARD_REMOVED_REVERSED: 'Card removed before completion; authorization reversed',
+  '30': 'Format error (ICC data could not be parsed)',
+  '75': 'Allowable number of PIN tries exceeded',
+  '91': 'Issuer or switch inoperative',
+  '96': 'System malfunction'
+};
 
 // Stored JSON columns -> objects
 function parseRow(row) {
@@ -580,8 +694,51 @@ app.post('/api/transactions/:id/reversal', (req, res) => {
   });
 });
 
+// APDU trace for a transaction: C-APDU/R-APDU steps, host events, TVR/TSI/CVM/CID explained,
+// a logcat-style log, and a DE55 required-tag check of the 0100 actually sent.
+app.get('/api/transactions/:id/apdu-trace', (req, res) => {
+  db.get('SELECT t.id, t.iso8583_message, a.trace FROM transactions t LEFT JOIN apdu_traces a ON a.transaction_id = t.id WHERE t.id = ?',
+    [req.params.id], (err, row) => {
+      if (err) return res.status(500).json({ error: 'Database error' });
+      if (!row) return res.status(404).json({ error: 'Transaction not found' });
+      if (!row.trace) return res.status(404).json({ error: 'No APDU trace for this transaction' });
+      const iso = JSON.parse(row.iso8583_message);
+      const de55 = iso && iso.fields && iso.fields['55'] ? iso.fields['55'].value : null;
+      res.json({
+        transaction_id: row.id,
+        ...JSON.parse(row.trace),
+        de55_check: de55 ? decoder.checkDE55(de55) : null
+      });
+    });
+});
+
+// Fault catalogue for POST /api/transactions/process { ..., "fault": "<name>" }
+app.get('/api/faults', (req, res) => {
+  res.json({ faults: listFaults() });
+});
+
+// Decoder for support work. Any subset of: tvr, tsi, cvm_results, cid, sw, cvm_list, tlv_hex
+// (decoded + explained), de55 (required-tag check), log (APDU log text).
+app.post('/api/tools/emv-decode', (req, res) => {
+  const b = req.body || {};
+  const jobs = {
+    tvr: decoder.decodeTVR, tsi: decoder.decodeTSI, cvm_results: decoder.decodeCVMResults, cid: decoder.decodeCID,
+    sw: decoder.decodeSW, cvm_list: decoder.decodeCVMList, tlv_hex: decoder.explainTLV, de55: decoder.checkDE55, log: decoder.parseApduLog
+  };
+  const asked = Object.keys(jobs).filter((k) => typeof b[k] === 'string' && b[k].trim() !== '');
+  if (asked.length === 0) {
+    return res.status(400).json({ error: `Nothing to decode (send any of: ${Object.keys(jobs).join(', ')})` });
+  }
+  const out = {};
+  for (const k of asked) {
+    try { out[k] = jobs[k](b[k]); } catch (e) { out[k] = { error: e.message }; }
+  }
+  res.json(out);
+});
+
 // Reset database
 app.post('/api/admin/reset', (req, res) => {
+  db.run('DELETE FROM apdu_traces');
   db.run('DELETE FROM reversals');
   db.run('DELETE FROM refunds');
   db.run('DELETE FROM transactions', (err) => {
@@ -611,7 +768,11 @@ initializeDatabase().then(() => {
   console.log('  GET  /api/transactions/:id            - Get transaction details');
   console.log('  POST /api/transactions/:id/refund     - Refund (APPROVED only; optional {amount}; capped)');
   console.log('  GET  /api/transactions/:id/refunds    - List refunds for a transaction');
-  console.log('  POST /api/transactions/:id/reversal   - Reverse an APPROVED auth with no refunds (0400)\n');
+  console.log('  POST /api/transactions/:id/reversal   - Reverse an APPROVED auth with no refunds (0400)');
+  console.log('  GET  /api/transactions/:id/apdu-trace - Card/terminal APDU trace, TVR/TSI/CVM/CID explained\n');
+  console.log('🧰 SUPPORT TOOLS:');
+  console.log('  GET  /api/faults                      - Fault catalogue (opt-in "fault" on /process)');
+  console.log('  POST /api/tools/emv-decode            - Decode TVR/TSI/CVM/CID/SW/TLV/DE55/APDU log\n');
   console.log('🧪 UTILITY ENDPOINTS:');
   console.log('  GET  /api/test-cards                  - Get test card numbers');
   console.log('  GET  /api/health                      - Health check');

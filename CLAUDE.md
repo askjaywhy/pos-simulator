@@ -13,6 +13,10 @@ page-object UI test layer for this simulator. These rules bind all of them.
 - **EMV tag values are simulated, not real cryptograms.** Tests verify transaction flow and
   response handling, not cryptographic validity. Assert on tag presence/format, never on
   cryptogram values.
+- **APDU trace and faults** (`backend/apdu-trace.js`, `backend/emv-decoder.js`): every transaction
+  has `GET /api/transactions/:id/apdu-trace`. `fault` on `/process` is opt-in; without it the
+  response is unchanged. Specs: `apdu-trace.spec.js` (15), `fault-injection.spec.js` (14). New
+  statuses from faults: `TERMINATED`, `TIMEOUT_REVERSED`, `DECLINED_BY_CARD`, `CARD_REMOVED_REVERSED`.
 
 ## Test cards (from `backend/server.js` TEST_CARDS and the UI dropdown)
 | Card (mask in output) | Brand | Expected |
