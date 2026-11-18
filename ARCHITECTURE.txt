@@ -1,179 +1,149 @@
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                   POS SIMULATOR - ARCHITECTURE DIAGRAM                       │
-└─────────────────────────────────────────────────────────────────────────────┘
+POS SIMULATOR - ARCHITECTURE
+Updated 2026-11-17 (HEAD c5bf19f). Source of truth: backend/server.js, backend/emv-iso8583.js.
+Simulator only: not EMV- or network-certified. Cryptograms and the unpredictable number are fixed samples.
 
-                            ┌──────────────────────┐
-                            │   Browser/Client     │
-                            │  (http://localhost   │
-                            │        :3000)        │
-                            └──────────┬───────────┘
-                                       │
-                    ┌──────────────────┴──────────────────┐
-                    │   HTTP/REST API Requests           │
-                    └──────────────────┬──────────────────┘
-                                       │
-        ┌──────────────────────────────┼──────────────────────────────┐
-        │                              │                              │
-        ▼                              ▼                              ▼
-  ┌─────────────┐          ┌──────────────────┐         ┌──────────────────┐
-  │  Frontend   │          │  Express.js      │         │ Static Files     │
-  │  index.html │◄────────►│  Server          │         │  (Reference)     │
-  │             │          │  :3001           │         │                  │
-  │ • Payment   │          │                  │         │ • emv-iso8583-   │
-  │   Form      │          │  11 API Endpoints│         │   reference.html │
-  │ • EMV Tabs  │          │  • POST process  │         │                  │
-  │ • ISO8583   │          │  • GET history   │         └──────────────────┘
-  │   Tabs      │          │  • GET :id/emv   │
-  │ • Results   │          │  • GET :id/iso8583
-  │ • History   │          │                  │
-  └─────────────┘          │ Imports:         │
-                           │ • emv-iso8583.js │
-                           │ • sqlite3 db     │
-                           │ • uuid generator │
-                           └────────┬─────────┘
-                                    │
-                 ┌──────────────────┴──────────────────┐
-                 │  Core Module Processing             │
-                 └──────────────────┬──────────────────┘
-                                    │
-              ┌─────────────────────┼─────────────────────┐
-              │                     │                     │
-              ▼                     ▼                     ▼
-        ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-        │  EMVTags     │    │ ISO8583      │    │ EMVTransaction
-        │  Class       │    │ Message      │    │ Class
-        │              │    │ Class        │    │
-        │ • 25+ Tags   │    │              │    │ • Orchestrates
-        │ • TLV Format │    │ • 64+ Fields │    │   both EMV+ISO8583
-        │ • toJSON()   │    │ • Bitmap     │    │ • Generates STAN
-        │ • getTLVHex()    │ • toHex()    │    │ • Returns combined
-        │              │    │ • toJSON()   │    │   transaction data
-        └──────────────┘    └──────────────┘    └──────────────┘
-              │                     │                     │
-              └─────────────────────┼─────────────────────┘
-                                    │
-                ┌───────────────────┴───────────────────┐
-                │  SQLite Database (In-Memory)          │
-                └───────────────────┬───────────────────┘
-                                    │
-              ┌─────────────────────┼─────────────────────┐
-              │                     │                     │
-              ▼                     ▼                     ▼
-        ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-        │ transactions │    │ decline_     │    │   indices    │
-        │   table      │    │   rules      │    │   (pk)       │
-        │              │    │   table      │    │              │
-        │ • id         │    │              │    │ • fast       │
-        │ • timestamp  │    │ • id         │    │   lookups    │
-        │ • card_*     │    │ • card_      │    │ • unique     │
-        │ • amount     │    │   pattern    │    │   constraint │
-        │ • status     │    │ • response_  │    │              │
-        │ • emv_tags   │    │   code       │    │              │
-        │ • iso8583_   │    │ • decline_   │    │              │
-        │   message    │    │   reason     │    │              │
-        └──────────────┘    └──────────────┘    └──────────────┘
+=====================================================================================
+1. COMPONENTS
+=====================================================================================
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              TEST LAYER                                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Playwright Test Suite (32+ tests)                                          │
-│  ├─ EMV Tags Tests (3)                                                      │
-│  │  ├─ Get EMV tags reference                                              │
-│  │  ├─ Verify standard tags present                                        │
-│  │  └─ Check tag attributes                                                │
-│  ├─ ISO 8583 Tests (3)                                                      │
-│  │  ├─ Get ISO 8583 fields reference                                       │
-│  │  ├─ Verify standard fields present                                      │
-│  │  └─ Check field attributes                                              │
-│  ├─ Transaction Tests (8)                                                   │
-│  │  ├─ Approve valid transaction                                           │
-│  │  ├─ Include EMV data in response                                        │
-│  │  ├─ Include ISO 8583 data in response                                   │
-│  │  ├─ Decline insufficient funds                                          │
-│  │  ├─ Decline lost card                                                   │
-│  │  ├─ Validate Luhn checksum                                              │
-│  │  ├─ Validate expiration format                                          │
-│  │  └─ Require all fields                                                  │
-│  ├─ Data Retrieval Tests (3)                                                │
-│  │  ├─ Get transaction EMV data                                            │
-│  │  ├─ Get transaction ISO 8583 data                                       │
-│  │  └─ Return 404 for nonexistent                                          │
-│  ├─ API Endpoint Tests (3)                                                  │
-│  │  ├─ Health check works                                                  │
-│  │  ├─ Get test cards                                                      │
-│  │  └─ Get transaction history                                             │
-│  └─ Edge Cases (3+)                                                         │
-│     ├─ STAN uniqueness                                                      │
-│     ├─ Large amounts                                                        │
-│     ├─ Small amounts                                                        │
-│     ├─ Hex format validation                                               │
-│     └─ MTI format validation                                               │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+  Browser ──► Terminal UI  :3000   frontend/index.html (single page, no build)
+                  │                served by scripts/serve-ui.js (Node static server)
+                  │ fetch, 15 s timeout on payments
+                  ▼
+              Express API  :3001   backend/server.js, base path /api
+                  │
+                  ├─ backend/emv-iso8583.js
+                  │     EMVTags         tag dictionary (24) + TLV build/decode
+                  │     ISO8583Message  MTI, primary bitmap, fields, hex_message
+                  │     EMVTransaction  builds the 0100 + DE55, sets the decision, builds the 0110
+                  │     buildFollowUpMessage   0200 refund / 0400 reversal
+                  │     maskPan, isCardExpired, simNow (SIM_NOW), currencyNumeric, nextStan
+                  │
+                  └─ SQLite :memory:  (data resets on restart or POST /api/admin/reset)
+                        transactions   id, card_number_masked, card_brand, exp_date, amount,
+                                       currency, merchant_id, status, response_code, auth_code,
+                                       emv_tags, iso8583_message (0100), iso8583_response (0110)
+                        refunds        id, transaction_id, amount, amount_minor, iso8583_message (0200)
+                        reversals      id, transaction_id UNIQUE, amount_minor, iso8583_message (0400)
+                        decline_rules  card_pattern (exact PAN), response_code, decline_reason
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            DATA FLOW EXAMPLE                                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  1. User enters card: 4111111111111111, Exp: 12/28, CVV: 123, Amount: 99.99│
-│     └─ Frontend sends POST /api/transactions/process                       │
-│                                                                             │
-│  2. Server validates:                                                      │
-│     ├─ Luhn checksum: PASS                                                 │
-│     ├─ Exp format: MM/YY format: PASS                                      │
-│     ├─ Check decline rules: Not in list → APPROVED                         │
-│     └─ Generate response code: 00                                          │
-│                                                                             │
-│  3. Build EMV data:                                                        │
-│     ├─ Add 9F06 (AID): 123456                                              │
-│     ├─ Add 9F26 (Cryptogram): ABCDEF01                                    │
-│     ├─ Add 95 (TVR): 0000000000                                            │
-│     ├─ Add 9B (TSI): 0000                                                  │
-│     └─ Generate TLV Hex: 9F06021234569F260...                             │
-│                                                                             │
-│  4. Build ISO 8583 message:                                                │
-│     ├─ MTI: 0100 (Payment request)                                         │
-│     ├─ Field 2 (PAN): 4111111111111111                                     │
-│     ├─ Field 4 (Amount): 009999 (in cents)                                 │
-│     ├─ Field 11 (STAN): 123456 (unique)                                    │
-│     ├─ Field 39 (Response): 00 (approved)                                  │
-│     └─ Generate message Hex: 0100...                                       │
-│                                                                             │
-│  5. Store in database:                                                     │
-│     ├─ Transaction ID, timestamp, card masked                              │
-│     ├─ EMV tags as JSON: {"9F06": {...}, "9F26": {...}, ...}              │
-│     ├─ ISO 8583 as JSON: {"0": "0100", "2": "4111...", ...}               │
-│     └─ Save to SQLite                                                      │
-│                                                                             │
-│  6. Return response to browser:                                            │
-│     ├─ success: true                                                       │
-│     ├─ status: "APPROVED"                                                  │
-│     ├─ response_code: "00"                                                 │
-│     ├─ emv: { tags: {...}, tlv_hex: "..." }                               │
-│     ├─ iso8583: { mti: "0100", fields: {...}, hex_message: "..." }        │
-│     └─ auth_code, transaction_id, timestamp, etc.                         │
-│                                                                             │
-│  7. Frontend displays:                                                     │
-│     ├─ Summary tab: Transaction details                                    │
-│     ├─ EMV Tags tab: 25+ tags with hex values                              │
-│     ├─ ISO 8583 tab: 64+ fields with values                                │
-│     └─ Copy buttons for hex data                                           │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+  Launcher: START_POS_SIMULATOR.bat -> Start-POS-Simulator.ps1 -> 3 windows
+            (scripts/run-backend.ps1, run-ui.ps1, run-tests.ps1). "test" / -RunTests runs the ready suite.
 
-COMPLIANCE FEATURES:
-✅ Luhn Algorithm       - Card number validation
-✅ EMV Level 1         - Full EMV tag support (25+)
-✅ ISO 8583            - Complete message format (64+ fields)
-✅ TLV Format          - Proper Tag-Length-Value encoding
-✅ Hex Output          - All data in proper hex format
-✅ STAN Uniqueness     - System Trace Audit Number generation per transaction
-✅ Response Codes      - ISO 8583 compliant (00, 51, 41, 54, 05, 14, etc.)
-✅ PCI Considerations  - No real card storage (test cards only)
+  QA lab (lab/, Docker): Kafka, Postgres, Splunk, risk-service :3002, soap-service :3003,
+  Java tests (REST Assured, Cucumber, Selenium). Reads the simulator only through its API.
+  See lab/README.md.
 
-PERFORMANCE:
-Backend startup:       < 2 seconds
-Frontend startup:      < 1 second
-Transaction processing: < 500ms
-Test suite:            < 2 minutes
+=====================================================================================
+2. API (/api)
+=====================================================================================
+
+  GET  /health                         {status, timestamp}
+  GET  /test-cards                     6 cards, exp 12/28
+  GET  /emv-tags                       tag dictionary
+  GET  /iso8583-fields                 field dictionary
+  GET  /field55/inspect?scheme=        sample 0100 + DE55 for visa|mastercard|amex|discover
+  POST /transactions/process           authorize -> 0100 + 0110
+  GET  /transactions/history           latest 50 (registered before /:id on purpose)
+  GET  /transactions/:id               stored row
+  GET  /transactions/:id/emv           stored EMV data
+  GET  /transactions/:id/iso8583       {iso8583: 0100, response: 0110}
+  POST /transactions/:id/refund        optional {amount}; 0200
+  GET  /transactions/:id/refunds       refunds, total_refunded, remaining_amount
+  POST /transactions/:id/reversal      0400, status -> REVERSED
+  POST /admin/reset                    clears transactions, refunds, reversals
+
+=====================================================================================
+3. AUTHORIZATION FLOW  (POST /transactions/process)
+=====================================================================================
+
+  Body: card_number, exp_date (MM/YY), cvv, amount, currency=USD, merchant_id=MERCHANT01, description
+
+  Validation, in order (each failure = HTTP 400):
+    1. required fields present          "Missing required fields" (amount 0 lands here)
+    2. Luhn                             "Invalid card number (Luhn check failed)"
+    3. exp_date matches NN/NN           "Invalid expiration date format (MM/YY)"
+    4. month 01-12                      "Invalid expiration month (01-12)"          DEF-004
+    5. amount > 0, <= 2 decimals, fits DE4 n12                                       DEF-006
+    6. currency in USD EUR GBP CAD AUD MXN   "Unsupported currency ..."
+
+  Decision, in order:
+    a. exact-PAN decline rule           51 / 41 / 54 / 05
+    b. card expired (UTC month, simNow) 54 Expired Card                             DEF-005
+    c. otherwise                        00, auth_code = AUTH + 6 hex of the txn id
+
+  Then setAuthorizationResult(): DE39 + EMV tag 8A (ASCII hex) set from the decision   DEF-002
+  Stored and returned: 0100 (iso8583) and 0110 (iso8583_response).
+
+=====================================================================================
+4. ISO 8583 MESSAGES
+=====================================================================================
+
+  hex_message = MTI + primary bitmap (16 hex) + each field's ASCII as hex, in field order.
+  Simplified: no LLVAR prefixes or binary packing (the lab SOAP service has a real ASCII packer).
+  Primary bitmap only, DE2-DE64. Bit 1 (secondary bitmap) never set.                 DEF-008
+  DE2 everywhere outside the message object = first 6 / last 4 (411111******1111).    DEF-003
+
+  0100 authorization request   bitmap 7038000002C08200
+    DE2 PAN (truncated)   DE3 000000      DE4 amount, minor units, n12 (Math.round)  DEF-001
+    DE11 STAN (sequential per process, 000001-999999, wraps)
+    DE12 hhmmss / DE13 MMDD (server local time)
+    DE39 decision (kept in the 0100 for compatibility)
+    DE41 TERM0001 (an8)   DE42 merchant_id (ans15, space-padded)
+    DE49 from currency    DE55 EMV TLV
+
+  0110 authorization response
+    echoes DE2 3 4 11 12 13 41 42 49; DE38 = last 6 of auth_code (approvals only);
+    DE39 decision; DE55 = 8A only (e.g. 8A023030)
+
+  0200 refund     DE3 200000, DE4 refund amount, new STAN, DE37 = retrieval ref of the original
+  0400 reversal   DE3 000000, DE4 original amount, new STAN, DE37 as above
+    DE37 = first 12 alphanumerics of the original transaction id, uppercase.
+
+=====================================================================================
+5. EMV (DE55)
+=====================================================================================
+
+  Emitted per transaction: 9F06 AID, 9F08, 9F07, 9F26, 95, 9B, 9F37, 9F10, 9F1A, 5F2A,
+  9C, 9A, 9F21, plus 8A once the decision is set.
+  AIDs: Visa A0000000031010, Mastercard A0000000041010, Amex A00000002501, Discover A0000001523010.
+  5F2A = 0 + DE49. 9A/9F21 = local date/time. 9F26 / 9F37 are fixed samples.
+  Tests assert presence and format, never cryptogram values.
+
+=====================================================================================
+6. REFUNDS AND REVERSALS
+=====================================================================================
+
+  Refund:   APPROVED only (else 422). Amount optional (default = remaining). Total capped at the
+            original in integer minor units (409 + remaining_amount). Invalid amount 400.
+            Status REFUNDED or PARTIALLY_REFUNDED.                                   DEF-007
+  Reversal: APPROVED only (422), not after any refund (409). Sets status REVERSED, so later
+            refunds and reversals are 422.
+  Both run through one in-process lock, so concurrent requests can't both pass the checks.
+
+=====================================================================================
+7. TEST CARDS  (exp 12/28, CVV 123)
+=====================================================================================
+
+  •••• 1111  Visa        00        •••• 0002  Visa  51 Insufficient Funds
+  •••• 4444  Mastercard  00        •••• 9987  Visa  41 Lost Card
+  •••• 0005  Amex        00        Rules only (not in the UI dropdown):
+  •••• 1117  Discover    00          4000000000000010 -> 54, 5105105105105100 -> 05
+
+  The cards stop approving after Dec 2028 unless SIM_NOW pins an earlier date.
+  Tests assume SIM_NOW is unset.
+
+=====================================================================================
+8. TEST LAYERS
+=====================================================================================
+
+  tests/ (Playwright, run from tests/, 1 worker)
+    API specs: emv-iso8583, de4-amount, de39-response-code, pan-masking, input-validation,
+               expiry-date, refunds, iso8583-bitmap, message-model, health, test-cards, ...
+    UI page-object layer: tests/ui/pages/TerminalPage.js + tests/ui/agent/*.spec.js
+    npm run test:ready | test:agent-ui | test:guard
+  Agentic kit: .claude/agents (planner, generator, locator-only healer) held by hook guards;
+    see CLAUDE.md.
+  CI: .github/workflows/ci.yml - guard self-tests + ready suite on Linux (--retries=0,
+    --ignore-snapshots; the visual baseline is Windows-only).
+  lab/java-tests: SimulatorApiTest, RiskApiTest, SoapServiceTest, Cucumber, Selenium.

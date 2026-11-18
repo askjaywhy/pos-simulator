@@ -39,8 +39,8 @@ Full guide: [`lab/README.md`](lab/README.md) · Java suite: [`lab/java-tests/REA
 
 ## 📋 Quick Features
 
-- ✅ **EMV TLV** - 23-tag dictionary; 12 scheme-flavored tags emitted in DE55 (simulated values, no real cryptogram)
-- ✅ **ISO 8583** - 0100 authorization message with DE2, 4, 11, 12, 13, 39, 49 and 55, plus a 22-field reference dictionary
+- ✅ **EMV TLV** - 24-tag dictionary; 13 scheme-flavored tags plus 8A emitted in DE55 (simulated values, no real cryptogram)
+- ✅ **ISO 8583** - 0100 request and 0110 response, 0200 refund and 0400 reversal messages, plus a 24-field reference dictionary
 - ✅ **Test Cards** - 4 approval brands and 4 decline codes (05, 41, 51, 54)
 - ✅ **RESTful API** - Transaction processing, history, refunds, EMV and ISO 8583 inspection
 - ✅ **Interactive UI** - Terminal simulator with EMV and ISO 8583 tabs
@@ -116,7 +116,7 @@ pos-simulator/
 ### Backend (Node.js + Express)
 - **server.js** - RESTful API with 14 endpoints
 - **emv-iso8583.js** - Core payment processing module
-  - `EMVTags` class - Manages 25+ EMV tags with TLV format
+  - `EMVTags` class - 24-tag dictionary with TLV encode/decode
   - `ISO8583Message` class - Builds ISO 8583 messages with hex output
   - `EMVTransaction` class - Complete transaction processing
 - **SQLite** - In-memory transaction database
@@ -149,13 +149,13 @@ pos-simulator/
 ### EMV Reference
 ```bash
 GET /api/emv-tags
-# Response: { tags: {...}, total: 25 }
+# Response: { tags: {...}, total: 24 }
 ```
 
 ### ISO 8583 Reference
 ```bash
 GET /api/iso8583-fields
-# Response: { fields: {...}, total: 64 }
+# Response: { fields: {...}, total: 24 }
 ```
 
 ### Process Transaction
@@ -218,8 +218,8 @@ GET /api/transactions/{id}/iso8583
 ### Full Endpoint List
 ```bash
 # Reference Data
-GET  /api/emv-tags                          # 25+ EMV tags
-GET  /api/iso8583-fields                    # 64+ ISO 8583 fields
+GET  /api/emv-tags                          # 24 EMV tags
+GET  /api/iso8583-fields                    # 24 ISO 8583 fields
 GET  /api/test-cards                        # Test card definitions
 
 # Transaction Processing
@@ -295,7 +295,7 @@ npx playwright show-report
 | 9F27 | Cryptogram Information Data | Cryptography | 1 byte |
 | ... | ... | ... | ... |
 
-**23 tags in the dictionary; 12 are emitted in DE55. Values are simulated: the cryptogram and unpredictable number are fixed samples.**
+**24 tags in the dictionary; 13 are emitted in DE55, plus 8A once the decision is set. Values are simulated: the cryptogram and unpredictable number are fixed samples.**
 
 ## 📊 ISO 8583 Fields Reference
 
@@ -308,14 +308,14 @@ npx playwright show-report
 | 39 | Response Code | numeric | 2 | Response |
 | ... | ... | ... | ... | ... |
 
-**22 fields in the reference dictionary. The 0100 message sets DE2 (truncated), 4, 11, 12, 13, 39, 49 and 55. Open defects are tracked in the [defect log](lab/java-tests/DEFECTS.md).**
+**24 fields in the reference dictionary. The 0100 message sets DE2 (truncated), 3, 4, 11, 12, 13, 39, 41, 42, 49 and 55 (bitmap `7038000002C08200`). Defects are tracked in the [defect log](lab/java-tests/DEFECTS.md).**
 
 ## 🔐 Compliance & Security
 
 - ✅ **Luhn Algorithm** - Card number validation
 - ✅ **TLV Format** - Tag-Length-Value encoding and decoding for DE55
 - ✅ **Hex Output** - EMV TLV and ISO 8583 message shown in hex
-- ℹ️ **Simulator only** - Not EMV- or network-certified; cryptograms are not real, and STAN is random, not guaranteed unique
+- ℹ️ **Simulator only** - Not EMV- or network-certified; cryptograms are not real. STAN is sequential per backend process and wraps after 999999
 - ✅ **PCI** - Test cards only; the PAN is truncated to first 6 / last 4 in DE2, `hex_message` and storage ([DEF-003](lab/java-tests/DEFECTS.md), fixed)
 
 ## 🛠️ Troubleshooting
@@ -396,5 +396,5 @@ Test/Development Use Only - Do not use with real card data
 ---
 
 **Version:** 1.0.0  
-**Last Updated:** 2026-10-11  
+**Last Updated:** 2026-11-17  
 **Status:** Test/development tool. See the [defect log](lab/java-tests/DEFECTS.md)
